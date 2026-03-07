@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "1"
+nanoid = "0.4"
+
+[workspace.lints.rust]
+future-incompatible = { level = "warn", priority = -1 }
+nonstandard_style = { level = "deny", priority = -2 }
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+needless_pass_by_value = "allow"
+
+[profile.release]
+lto = true
+codegen-units = 1

@@ -1,0 +1,15 @@
+[package]
+name = "kassi-types"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+nanoid = { workspace = true }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+serde_json = "1"
