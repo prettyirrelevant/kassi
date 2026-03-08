@@ -1,3 +1,44 @@
-fn main() {
-    println!("kassi-server");
+use tokio::net::TcpListener;
+use tracing_subscriber::EnvFilter;
+
+use kassi_server::config::Config;
+use kassi_server::{AppState, app};
+
+#[tokio::main]
+async fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
+        .json()
+        .init();
+
+    let config = Config::from_env();
+
+    let db = kassi_db::create_pool(&config.database_url)
+        .await
+        .expect("failed to create database pool");
+
+    kassi_db::run_migrations(&db)
+        .await
+        .expect("failed to run migrations");
+
+    let addr = std::net::SocketAddr::from(([0, 0, 0, 0], config.port));
+    let listener = TcpListener::bind(addr)
+        .await
+        .expect("failed to bind address");
+
+    tracing::info!("listening on {addr}");
+
+    axum::serve(listener, app(AppState { db }))
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .expect("server error");
+}
+
+async fn shutdown_signal() {
+    tokio::signal::ctrl_c()
+        .await
+        .expect("failed to install ctrl+c handler");
+    tracing::info!("shutting down");
 }

@@ -24,9 +24,12 @@ solana-message = "2"
 solana-pubkey = "2"
 solana-signer = "2"
 solana-transaction = { version = "2", features = ["bincode", "verify"] }
+reqwest = { version = "0.12", features = ["json"] }
+secrecy = "0.10"
+tokio = { version = "1", features = ["sync"] }
+serde = { workspace = true }
 thiserror = { workspace = true }
 tracing = "0.1"
-vaultrs = "0.7"
 zeroize = { version = "1", features = ["derive"] }
 
 [dev-dependencies]

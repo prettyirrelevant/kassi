@@ -1,7 +1,7 @@
 mod derivation;
 mod evm;
+mod infisical;
 mod solana;
-mod vault;
 
 use std::fmt;
 
@@ -10,7 +10,7 @@ use zeroize::Zeroize;
 
 pub use derivation::{derive_evm_address, derive_solana_address};
 pub use evm::{encode_erc20_transfer, encode_multicall3, MULTICALL3_ADDRESS};
-pub use vault::VaultTransit;
+pub use infisical::{InfisicalKms, KmsError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Namespace {
@@ -29,8 +29,8 @@ impl fmt::Display for Namespace {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SignerError {
-    #[error("vault error: {0}")]
-    Vault(#[from] vaultrs::error::ClientError),
+    #[error("kms error: {0}")]
+    Kms(#[from] KmsError),
 
     #[error("BIP-32 derivation error: {0}")]
     Bip32(#[from] bip32::Error),
@@ -42,43 +42,43 @@ pub enum SignerError {
     Signing(String),
 }
 
-/// Generate a new BIP-32 seed for a merchant, encrypt it via Vault transit,
+/// Generate a new BIP-32 seed for a merchant, encrypt it via Infisical KMS,
 /// and return the ciphertext. The caller stores the ciphertext in the database.
 ///
 /// # Errors
-/// Returns `SignerError::Vault` if key creation or encryption fails.
+/// Returns `SignerError::Kms` if key creation or encryption fails.
 pub async fn create_merchant_seed(
-    vault: &VaultTransit,
+    kms: &InfisicalKms,
     merchant_id: &str,
 ) -> Result<String, SignerError> {
-    let key_name = VaultTransit::key_name(merchant_id);
-    vault.create_key(&key_name).await?;
+    let key_name = InfisicalKms::key_name(merchant_id);
+    kms.create_key(&key_name).await?;
 
     let mut seed = [0u8; 64];
     rand::thread_rng().fill_bytes(&mut seed);
 
-    let ciphertext = vault.encrypt(&key_name, &seed).await?;
+    let ciphertext = kms.encrypt(&key_name, &seed).await?;
     seed.zeroize();
 
     tracing::info!(merchant_id, "created merchant seed");
     Ok(ciphertext)
 }
 
-/// Decrypt a merchant seed from Vault transit and derive a chain address.
+/// Decrypt a merchant seed and derive a chain address.
 /// Returns the address as a string (checksummed hex for EVM, base58 for Solana).
 ///
 /// # Errors
-/// Returns `SignerError` if Vault decryption or key derivation fails.
+/// Returns `SignerError` if decryption or key derivation fails.
 pub async fn derive_address(
-    vault: &VaultTransit,
+    kms: &InfisicalKms,
     merchant_id: &str,
     encrypted_seed: &str,
     namespace: Namespace,
     chain_id: u64,
     index: u32,
 ) -> Result<String, SignerError> {
-    let key_name = VaultTransit::key_name(merchant_id);
-    let mut seed = vault.decrypt(&key_name, encrypted_seed).await?;
+    let key_name = InfisicalKms::key_name(merchant_id);
+    let mut seed = kms.decrypt(&key_name, encrypted_seed).await?;
 
     let result = match namespace {
         Namespace::Evm => derive_evm_address(&seed, chain_id, index).map(|a| a.to_checksum(None)),
@@ -95,17 +95,17 @@ pub async fn derive_address(
 /// Returns EIP-2718 encoded signed transaction bytes.
 ///
 /// # Errors
-/// Returns `SignerError` if Vault decryption, key derivation, or signing fails.
+/// Returns `SignerError` if decryption, key derivation, or signing fails.
 pub async fn sign_evm_transaction(
-    vault: &VaultTransit,
+    kms: &InfisicalKms,
     merchant_id: &str,
     encrypted_seed: &str,
     chain_id: u64,
     index: u32,
     tx: alloy::rpc::types::TransactionRequest,
 ) -> Result<Vec<u8>, SignerError> {
-    let key_name = VaultTransit::key_name(merchant_id);
-    let mut seed = vault.decrypt(&key_name, encrypted_seed).await?;
+    let key_name = InfisicalKms::key_name(merchant_id);
+    let mut seed = kms.decrypt(&key_name, encrypted_seed).await?;
 
     let result = evm::sign_evm_tx(&seed, chain_id, index, tx).await;
     seed.zeroize();
@@ -120,17 +120,17 @@ pub async fn sign_evm_transaction(
 /// The transaction is mutated in place with the deposit keypair's signature.
 ///
 /// # Errors
-/// Returns `SignerError` if Vault decryption, key derivation, or signing fails.
+/// Returns `SignerError` if decryption, key derivation, or signing fails.
 pub async fn sign_solana_transaction(
-    vault: &VaultTransit,
+    kms: &InfisicalKms,
     merchant_id: &str,
     encrypted_seed: &str,
     chain_id: u64,
     index: u32,
     tx: &mut solana_transaction::Transaction,
 ) -> Result<(), SignerError> {
-    let key_name = VaultTransit::key_name(merchant_id);
-    let mut seed = vault.decrypt(&key_name, encrypted_seed).await?;
+    let key_name = InfisicalKms::key_name(merchant_id);
+    let mut seed = kms.decrypt(&key_name, encrypted_seed).await?;
 
     let result = solana::sign_solana_tx(&seed, chain_id, index, tx);
     seed.zeroize();

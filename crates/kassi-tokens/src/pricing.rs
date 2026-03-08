@@ -1,14 +1,9 @@
 use std::collections::HashMap;
 
+use std::time::Duration;
+
 use reqwest::Client;
 use serde::Deserialize;
-
-fn default_client() -> Client {
-    Client::builder()
-        .user_agent("kassi/0.1")
-        .build()
-        .unwrap_or_default()
-}
 
 #[derive(Debug, thiserror::Error)]
 pub enum PricingError {
@@ -40,27 +35,13 @@ pub struct DefiLlama {
 }
 
 impl DefiLlama {
-    #[must_use]
-    pub fn new() -> Self {
+    fn new(client: Client) -> Self {
         Self {
-            http: default_client(),
+            http: client,
             base_url: "https://coins.llama.fi".to_string(),
         }
     }
 
-    #[must_use]
-    pub fn with_base_url(base_url: String) -> Self {
-        Self {
-            http: default_client(),
-            base_url,
-        }
-    }
-}
-
-impl Default for DefiLlama {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl PriceSource for DefiLlama {
@@ -106,27 +87,13 @@ pub struct CoinGecko {
 }
 
 impl CoinGecko {
-    #[must_use]
-    pub fn new() -> Self {
+    fn new(client: Client) -> Self {
         Self {
-            http: default_client(),
+            http: client,
             base_url: "https://api.coingecko.com".to_string(),
         }
     }
 
-    #[must_use]
-    pub fn with_base_url(base_url: String) -> Self {
-        Self {
-            http: default_client(),
-            base_url,
-        }
-    }
-}
-
-impl Default for CoinGecko {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl PriceSource for CoinGecko {
@@ -169,11 +136,25 @@ pub struct PriceClient<P: PriceSource, S: PriceSource> {
 }
 
 impl PriceClient<DefiLlama, CoinGecko> {
+    /// # Panics
+    /// Panics if the HTTP client cannot be built (TLS backend unavailable).
     #[must_use]
     pub fn new() -> Self {
+        let client = Client::builder()
+            .user_agent(format!(
+                "kassi/{} ({})",
+                env!("CARGO_PKG_VERSION"),
+                option_env!("KASSI_GIT_SHA").unwrap_or("dev"),
+            ))
+            .timeout(Duration::from_secs(15))
+            .connect_timeout(Duration::from_secs(5))
+            .pool_max_idle_per_host(5)
+            .build()
+            .expect("failed to build HTTP client");
+
         Self {
-            primary: DefiLlama::new(),
-            secondary: CoinGecko::new(),
+            primary: DefiLlama::new(client.clone()),
+            secondary: CoinGecko::new(client),
         }
     }
 }
@@ -359,7 +340,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "hits real DefiLlama API"]
     async fn defillama_live() {
-        let source = DefiLlama::new();
+        let source = DefiLlama::new(Client::new());
         let prices = source.get_prices(&["ethereum", "usd-coin"]).await.unwrap();
 
         assert_eq!(prices.len(), 2);
@@ -372,7 +353,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "hits real CoinGecko API"]
     async fn coingecko_live() {
-        let source = CoinGecko::new();
+        let source = CoinGecko::new(Client::new());
         let prices = source.get_prices(&["ethereum", "usd-coin"]).await.unwrap();
 
         assert_eq!(prices.len(), 2);
