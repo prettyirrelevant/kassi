@@ -2,7 +2,7 @@ use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 
 use kassi_server::config::Config;
-use kassi_server::{AppState, app};
+use kassi_server::{app, AppState};
 
 #[tokio::main]
 async fn main() {
@@ -18,10 +18,6 @@ async fn main() {
     let db = kassi_db::create_pool(&config.database_url)
         .await
         .expect("failed to create database pool");
-
-    kassi_db::run_migrations(&db)
-        .await
-        .expect("failed to run migrations");
 
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], config.port));
     let listener = TcpListener::bind(addr)

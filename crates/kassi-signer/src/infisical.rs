@@ -119,8 +119,11 @@ impl InfisicalKms {
             .build()
             .expect("failed to build HTTP client");
 
-        let token_state =
-            authenticate(&client, client_id.expose_secret(), client_secret.expose_secret())
+        let token_state = authenticate(
+            &client,
+            client_id.expose_secret(),
+            client_secret.expose_secret(),
+        )
         .await?;
 
         Ok(Self {
@@ -306,13 +309,9 @@ mod tests {
     use super::*;
 
     async fn dev_client() -> InfisicalKms {
-        InfisicalKms::login(
-            "test-client-id",
-            "test-client-secret",
-            "test-project-id",
-        )
-        .await
-        .unwrap()
+        InfisicalKms::login("test-client-id", "test-client-secret", "test-project-id")
+            .await
+            .unwrap()
     }
 
     #[tokio::test]

@@ -37,10 +37,7 @@ pub enum ServerError {
     Forbidden,
 
     #[error("no {entity} found with id '{id}'.")]
-    NotFound {
-        entity: &'static str,
-        id: String,
-    },
+    NotFound { entity: &'static str, id: String },
 
     #[error("{0}")]
     Conflict(String),
@@ -52,7 +49,7 @@ pub enum ServerError {
     BadRequest(String),
 
     #[error("an unexpected server error occurred.")]
-    Internal(#[from] sqlx::Error),
+    Internal(#[from] kassi_db::DbError),
 }
 
 impl ServerError {
@@ -79,25 +76,24 @@ impl IntoResponse for ServerError {
         }
 
         let (message, details) = match self {
-            Self::RouteNotFound => {
-                (Cow::Borrowed("the requested route does not exist."), None)
-            }
-            Self::AuthenticationRequired => {
-                (Cow::Borrowed("missing or invalid authentication credentials."), None)
-            }
-            Self::Forbidden => {
-                (Cow::Borrowed("you do not have permission to access this resource."), None)
-            }
-            Self::NotFound { entity, id } => {
-                (Cow::Owned(format!("no {entity} found with id '{id}'.")), None)
-            }
+            Self::RouteNotFound => (Cow::Borrowed("the requested route does not exist."), None),
+            Self::AuthenticationRequired => (
+                Cow::Borrowed("missing or invalid authentication credentials."),
+                None,
+            ),
+            Self::Forbidden => (
+                Cow::Borrowed("you do not have permission to access this resource."),
+                None,
+            ),
+            Self::NotFound { entity, id } => (
+                Cow::Owned(format!("no {entity} found with id '{id}'.")),
+                None,
+            ),
             Self::Conflict(msg) | Self::BadRequest(msg) => (Cow::Owned(msg), None),
             Self::ValidationFailed(details) => {
                 (Cow::Borrowed("request validation failed."), Some(details))
             }
-            Self::Internal(_) => {
-                (Cow::Borrowed("an unexpected server error occurred."), None)
-            }
+            Self::Internal(_) => (Cow::Borrowed("an unexpected server error occurred."), None),
         };
 
         let body = ErrorBody {

@@ -3,6 +3,8 @@ resolver = "2"
 members = ["crates/*"]
 
 [workspace.dependencies]
+diesel = { version = "2.2", features = ["postgres", "chrono", "serde_json"] }
+diesel-async = { version = "0.7", features = ["postgres", "bb8"] }
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
 nanoid = "0.4"

@@ -6,7 +6,7 @@ across EVM and Solana chains. deposits are detected, confirmed, swept (with fees
 and settled to merchant-configured destinations. the whole lifecycle is managed
 through a REST API and a react dashboard.
 
-stack: rust (axum, sqlx, postgres), react + vite
+stack: rust (axum, diesel, postgres), react + vite
 
 
 data flow

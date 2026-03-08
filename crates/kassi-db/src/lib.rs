@@ -1,43 +1,27 @@
-use sqlx::postgres::{PgPool, PgPoolOptions};
+pub mod models;
+pub mod schema;
+
+use diesel_async::pooled_connection::bb8::Pool;
+use diesel_async::pooled_connection::AsyncDieselConnectionManager;
+use diesel_async::AsyncPgConnection;
+
+pub type DbPool = Pool<AsyncPgConnection>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {
-    #[error("database error: {0}")]
-    Sqlx(#[from] sqlx::Error),
-
-    #[error("migration error: {0}")]
-    Migrate(#[from] sqlx::migrate::MigrateError),
+    #[error("pool error: {0}")]
+    Pool(String),
 }
 
-/// Creates a connection pool to the given Postgres database.
+/// Creates a bb8 connection pool for the given Postgres database.
 ///
 /// # Errors
-/// Returns `DbError::Sqlx` if the connection fails.
-pub async fn create_pool(database_url: &str) -> Result<PgPool, DbError> {
-    Ok(PgPoolOptions::new()
-        .max_connections(10)
-        .connect(database_url)
-        .await?)
-}
-
-/// Runs all pending database migrations.
-///
-/// # Errors
-/// Returns `DbError::Migrate` if a migration fails.
-pub async fn run_migrations(pool: &PgPool) -> Result<(), DbError> {
-    sqlx::migrate!("../kassi-db/migrations").run(pool).await?;
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[sqlx::test(migrations = "../kassi-db/migrations")]
-    async fn migrations_run_cleanly(_pool: PgPool) {}
-
-    #[sqlx::test(migrations = "../kassi-db/migrations")]
-    async fn migrations_are_idempotent(pool: PgPool) {
-        run_migrations(&pool).await.unwrap();
-    }
+/// Returns `DbError::Pool` if the pool cannot be built.
+pub async fn create_pool(database_url: &str) -> Result<DbPool, DbError> {
+    let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(database_url);
+    Pool::builder()
+        .max_size(10)
+        .build(config)
+        .await
+        .map_err(|e| DbError::Pool(e.to_string()))
 }

@@ -5,16 +5,15 @@ mod routes;
 
 use axum::http::Method;
 use axum::Router;
-use sqlx::PgPool;
+use kassi_db::DbPool;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub db: PgPool,
+    pub db: DbPool,
 }
 
-#[must_use]
 pub fn app(state: AppState) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -43,19 +42,27 @@ mod tests {
 
     use super::*;
 
+    async fn test_pool() -> DbPool {
+        kassi_db::create_pool(&std::env::var("DATABASE_URL").expect("DATABASE_URL must be set"))
+            .await
+            .expect("failed to create test pool")
+    }
+
     mod health {
         use super::*;
 
-        #[sqlx::test(migrations = "../kassi-db/migrations")]
-        async fn returns_200_with_healthy_status(pool: PgPool) {
-            let response = app(AppState { db: pool })
-                .oneshot(
-                    Request::get("/health")
-                        .body(axum::body::Body::empty())
-                        .unwrap(),
-                )
-                .await
-                .unwrap();
+        #[tokio::test]
+        async fn returns_200_with_healthy_status() {
+            let response = app(AppState {
+                db: test_pool().await,
+            })
+            .oneshot(
+                Request::get("/health")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
 
             assert_eq!(response.status(), StatusCode::OK);
 
@@ -69,16 +76,18 @@ mod tests {
     mod fallback {
         use super::*;
 
-        #[sqlx::test(migrations = "../kassi-db/migrations")]
-        async fn unknown_route_returns_404(pool: PgPool) {
-            let response = app(AppState { db: pool })
-                .oneshot(
-                    Request::get("/nonexistent")
-                        .body(axum::body::Body::empty())
-                        .unwrap(),
-                )
-                .await
-                .unwrap();
+        #[tokio::test]
+        async fn unknown_route_returns_404() {
+            let response = app(AppState {
+                db: test_pool().await,
+            })
+            .oneshot(
+                Request::get("/nonexistent")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
 
             assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
@@ -92,18 +101,20 @@ mod tests {
     mod cors {
         use super::*;
 
-        #[sqlx::test(migrations = "../kassi-db/migrations")]
-        async fn preflight_returns_cors_headers(pool: PgPool) {
-            let response = app(AppState { db: pool })
-                .oneshot(
-                    Request::options("/health")
-                        .header("origin", "https://example.com")
-                        .header("access-control-request-method", "GET")
-                        .body(axum::body::Body::empty())
-                        .unwrap(),
-                )
-                .await
-                .unwrap();
+        #[tokio::test]
+        async fn preflight_returns_cors_headers() {
+            let response = app(AppState {
+                db: test_pool().await,
+            })
+            .oneshot(
+                Request::options("/health")
+                    .header("origin", "https://example.com")
+                    .header("access-control-request-method", "GET")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
 
             assert!(response
                 .headers()

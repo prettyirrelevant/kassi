@@ -41,7 +41,6 @@ impl DefiLlama {
             base_url: "https://coins.llama.fi".to_string(),
         }
     }
-
 }
 
 impl PriceSource for DefiLlama {
@@ -93,7 +92,6 @@ impl CoinGecko {
             base_url: "https://api.coingecko.com".to_string(),
         }
     }
-
 }
 
 impl PriceSource for CoinGecko {

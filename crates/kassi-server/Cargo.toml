@@ -8,22 +8,20 @@ kassi-db = { path = "../kassi-db" }
 kassi-types = { path = "../kassi-types" }
 
 axum = "0.8"
+chrono = "0.4"
+envy = "0.4"
 serde = { workspace = true }
 serde_json = "1"
+sha2 = "0.10"
 thiserror = { workspace = true }
-sqlx = { version = "0.8", features = ["postgres", "runtime-tokio", "tls-rustls", "chrono"] }
 tokio = { version = "1", features = ["full"] }
 tower-http = { version = "0.6", features = ["trace", "cors"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-sha2 = "0.10.9"
-chrono = "0.4.44"
-envy = "0.4.2"
 
 [dev-dependencies]
 http-body-util = "0.1"
 hyper = "1"
-sqlx = { version = "0.8", features = ["postgres", "runtime-tokio", "tls-rustls", "chrono", "migrate"] }
 tower = { version = "0.5", features = ["util"] }
 
 [lints]
