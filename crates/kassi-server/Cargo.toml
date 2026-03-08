@@ -20,5 +20,11 @@ sha2 = "0.10.9"
 chrono = "0.4.44"
 envy = "0.4.2"
 
+[dev-dependencies]
+http-body-util = "0.1"
+hyper = "1"
+sqlx = { version = "0.8", features = ["postgres", "runtime-tokio", "tls-rustls", "chrono", "migrate"] }
+tower = { version = "0.5", features = ["util"] }
+
 [lints]
 workspace = true

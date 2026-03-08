@@ -27,6 +27,9 @@ pub struct ValidationDetail {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ServerError {
+    #[error("the requested route does not exist.")]
+    RouteNotFound,
+
     #[error("missing or invalid authentication credentials.")]
     AuthenticationRequired,
 
@@ -55,6 +58,7 @@ pub enum ServerError {
 impl ServerError {
     fn status_and_code(&self) -> (StatusCode, &'static str) {
         match self {
+            Self::RouteNotFound => (StatusCode::NOT_FOUND, "route_not_found"),
             Self::AuthenticationRequired => (StatusCode::UNAUTHORIZED, "authentication_required"),
             Self::Forbidden => (StatusCode::FORBIDDEN, "forbidden"),
             Self::NotFound { .. } => (StatusCode::NOT_FOUND, "resource_not_found"),
@@ -75,6 +79,9 @@ impl IntoResponse for ServerError {
         }
 
         let (message, details) = match self {
+            Self::RouteNotFound => {
+                (Cow::Borrowed("the requested route does not exist."), None)
+            }
             Self::AuthenticationRequired => {
                 (Cow::Borrowed("missing or invalid authentication credentials."), None)
             }
