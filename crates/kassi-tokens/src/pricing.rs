@@ -64,10 +64,7 @@ impl Default for DefiLlama {
 }
 
 impl PriceSource for DefiLlama {
-    async fn get_prices(
-        &self,
-        coingecko_ids: &[&str],
-    ) -> Result<Vec<TokenPrice>, PricingError> {
+    async fn get_prices(&self, coingecko_ids: &[&str]) -> Result<Vec<TokenPrice>, PricingError> {
         let coins = coingecko_ids
             .iter()
             .map(|id| format!("coingecko:{id}"))
@@ -133,10 +130,7 @@ impl Default for CoinGecko {
 }
 
 impl PriceSource for CoinGecko {
-    async fn get_prices(
-        &self,
-        coingecko_ids: &[&str],
-    ) -> Result<Vec<TokenPrice>, PricingError> {
+    async fn get_prices(&self, coingecko_ids: &[&str]) -> Result<Vec<TokenPrice>, PricingError> {
         let ids = coingecko_ids.join(",");
         let url = format!(
             "{}/api/v3/simple/price?ids={ids}&vs_currencies=usd",
@@ -401,5 +395,4 @@ mod tests {
         assert_eq!(prices.len(), 2);
         assert_eq!(prices[1], usdc_price(1.0));
     }
-
 }

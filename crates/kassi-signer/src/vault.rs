@@ -35,14 +35,8 @@ impl VaultTransit {
     /// Returns `SignerError::Vault` if the Vault API call fails.
     pub async fn encrypt(&self, name: &str, plaintext: &[u8]) -> Result<String, SignerError> {
         let b64 = BASE64.encode(plaintext);
-        let resp = vaultrs::transit::data::encrypt(
-            &self.client,
-            &self.mount,
-            name,
-            &b64,
-            None,
-        )
-        .await?;
+        let resp =
+            vaultrs::transit::data::encrypt(&self.client, &self.mount, name, &b64, None).await?;
         Ok(resp.ciphertext)
     }
 
@@ -52,14 +46,9 @@ impl VaultTransit {
     /// Returns `SignerError::Vault` if the Vault API call fails,
     /// or `SignerError::Base64` if the decrypted payload is not valid base64.
     pub async fn decrypt(&self, name: &str, ciphertext: &str) -> Result<Vec<u8>, SignerError> {
-        let resp = vaultrs::transit::data::decrypt(
-            &self.client,
-            &self.mount,
-            name,
-            ciphertext,
-            None,
-        )
-        .await?;
+        let resp =
+            vaultrs::transit::data::decrypt(&self.client, &self.mount, name, ciphertext, None)
+                .await?;
         Ok(BASE64.decode(&resp.plaintext)?)
     }
 }

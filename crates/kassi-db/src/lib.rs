@@ -9,6 +9,10 @@ pub enum DbError {
     Migrate(#[from] sqlx::migrate::MigrateError),
 }
 
+/// Creates a connection pool to the given Postgres database.
+///
+/// # Errors
+/// Returns `DbError::Sqlx` if the connection fails.
 pub async fn create_pool(database_url: &str) -> Result<PgPool, DbError> {
     Ok(PgPoolOptions::new()
         .max_connections(10)
@@ -16,10 +20,12 @@ pub async fn create_pool(database_url: &str) -> Result<PgPool, DbError> {
         .await?)
 }
 
+/// Runs all pending database migrations.
+///
+/// # Errors
+/// Returns `DbError::Migrate` if a migration fails.
 pub async fn run_migrations(pool: &PgPool) -> Result<(), DbError> {
-    sqlx::migrate!("../kassi-db/migrations")
-        .run(pool)
-        .await?;
+    sqlx::migrate!("../kassi-db/migrations").run(pool).await?;
     Ok(())
 }
 
