@@ -10,7 +10,7 @@ use kassi_server::AppState;
 use rand_core::RngCore;
 use tower::ServiceExt;
 
-use common::{eip191_sign, eth_address, siwe_message, siws_message, test_state};
+use common::{authenticate, eip191_sign, eth_address, siwe_message, siws_message, test_state};
 
 async fn request_nonce(state: &AppState) -> String {
     let response = kassi_server::app(state.clone())
@@ -168,6 +168,129 @@ async fn second_login_with_same_wallet_returns_same_merchant() {
     let merchant_id_2 = json2["data"]["merchant_id"].as_str().unwrap().to_string();
 
     assert_eq!(merchant_id_1, merchant_id_2);
+}
+
+mod link {
+    use super::*;
+
+    async fn link_request(
+        state: &AppState,
+        token: &str,
+        message: &str,
+        signature: &str,
+    ) -> (StatusCode, serde_json::Value) {
+        let body = serde_json::json!({
+            "message": message,
+            "signature": signature,
+        });
+
+        let response = kassi_server::app(state.clone())
+            .oneshot(
+                Request::post("/auth/link")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(axum::body::Body::from(serde_json::to_vec(&body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let status = response.status();
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        (status, json)
+    }
+
+    #[tokio::test]
+    async fn link_solana_wallet_to_evm_authenticated_merchant() {
+        let state = test_state().await;
+        let (token, _merchant_id) = authenticate(&state).await;
+
+        // generate a solana keypair
+        let mut rng_bytes = [0u8; 32];
+        rand_core::OsRng.fill_bytes(&mut rng_bytes);
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&rng_bytes);
+        let sol_address = bs58::encode(signing_key.verifying_key().as_bytes()).into_string();
+
+        let nonce = request_nonce(&state).await;
+        let message = siws_message(&sol_address, &nonce);
+        let sig = signing_key.sign(message.as_bytes());
+        let signature = bs58::encode(sig.to_bytes()).into_string();
+
+        let (status, json) = link_request(&state, &token, &message, &signature).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(json["data"]["signer_id"]
+            .as_str()
+            .unwrap()
+            .starts_with("sig_"));
+        assert_eq!(json["data"]["address"].as_str().unwrap(), sol_address);
+        assert_eq!(json["data"]["signer_type"].as_str().unwrap(), "solana");
+    }
+
+    #[tokio::test]
+    async fn linked_wallet_can_authenticate_to_same_merchant() {
+        let state = test_state().await;
+        let (token, merchant_id) = authenticate(&state).await;
+
+        // link a solana wallet
+        let mut rng_bytes = [0u8; 32];
+        rand_core::OsRng.fill_bytes(&mut rng_bytes);
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&rng_bytes);
+        let sol_address = bs58::encode(signing_key.verifying_key().as_bytes()).into_string();
+
+        let nonce = request_nonce(&state).await;
+        let message = siws_message(&sol_address, &nonce);
+        let sig = signing_key.sign(message.as_bytes());
+        let signature = bs58::encode(sig.to_bytes()).into_string();
+
+        let (status, _) = link_request(&state, &token, &message, &signature).await;
+        assert_eq!(status, StatusCode::OK);
+
+        // now authenticate with the linked solana wallet
+        let nonce2 = request_nonce(&state).await;
+        let message2 = siws_message(&sol_address, &nonce2);
+        let sig2 = signing_key.sign(message2.as_bytes());
+        let signature2 = bs58::encode(sig2.to_bytes()).into_string();
+
+        let (status, json) = verify_request(&state, &message2, &signature2).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["data"]["merchant_id"].as_str().unwrap(), merchant_id);
+    }
+
+    #[tokio::test]
+    async fn linking_already_linked_wallet_returns_conflict() {
+        let state = test_state().await;
+        let (token, _) = authenticate(&state).await;
+
+        // link a solana wallet
+        let mut rng_bytes = [0u8; 32];
+        rand_core::OsRng.fill_bytes(&mut rng_bytes);
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&rng_bytes);
+        let sol_address = bs58::encode(signing_key.verifying_key().as_bytes()).into_string();
+
+        let nonce = request_nonce(&state).await;
+        let message = siws_message(&sol_address, &nonce);
+        let sig = signing_key.sign(message.as_bytes());
+        let signature = bs58::encode(sig.to_bytes()).into_string();
+
+        let (status, _) = link_request(&state, &token, &message, &signature).await;
+        assert_eq!(status, StatusCode::OK);
+
+        // try to link the same wallet again (from a different merchant)
+        let (token2, _) = authenticate(&state).await;
+
+        let nonce2 = request_nonce(&state).await;
+        let message2 = siws_message(&sol_address, &nonce2);
+        let sig2 = signing_key.sign(message2.as_bytes());
+        let signature2 = bs58::encode(sig2.to_bytes()).into_string();
+
+        let (status, json) = link_request(&state, &token2, &message2, &signature2).await;
+
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(json["error"]["code"], "conflict");
+    }
 }
 
 #[tokio::test]

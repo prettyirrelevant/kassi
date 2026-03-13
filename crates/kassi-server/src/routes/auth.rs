@@ -12,6 +12,7 @@ use kassi_types::{EntityId, EntityPrefix};
 use serde::{Deserialize, Serialize};
 
 use crate::errors::ServerError;
+use crate::extractors::SessionAuth;
 use crate::response::ApiSuccess;
 use crate::AppState;
 
@@ -35,6 +36,19 @@ struct VerifyResponse {
     merchant_id: String,
 }
 
+#[derive(Deserialize)]
+struct LinkRequest {
+    message: String,
+    signature: String,
+}
+
+#[derive(Serialize)]
+struct LinkResponse {
+    signer_id: String,
+    address: String,
+    signer_type: String,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct Claims {
     pub merchant_id: String,
@@ -48,6 +62,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/auth/nonce", get(get_nonce))
         .route("/auth/verify", post(verify))
+        .route("/auth/link", post(link))
 }
 
 async fn get_nonce(
@@ -183,6 +198,76 @@ async fn verify(
 
     Ok(ApiSuccess {
         data: VerifyResponse { token, merchant_id },
+    })
+}
+
+async fn link(
+    State(state): State<AppState>,
+    session: SessionAuth,
+    Json(body): Json<LinkRequest>,
+) -> Result<ApiSuccess<LinkResponse>, ServerError> {
+    let (address, nonce, signer_type) = if body.message.contains("Ethereum account:") {
+        verify_evm(&body.message, &body.signature).await?
+    } else if body.message.contains("Solana account:") {
+        verify_solana(&body.message, &body.signature)?
+    } else {
+        return Err(ServerError::BadRequest("unsupported message format".into()));
+    };
+
+    let mut conn = state
+        .db
+        .get()
+        .await
+        .map_err(|e| kassi_db::DbError::Pool(e.to_string()))?;
+
+    // consume the nonce
+    let deleted = kassi_db::diesel::delete(
+        schema::nonces::table
+            .filter(schema::nonces::nonce.eq(&nonce))
+            .filter(schema::nonces::expires_at.gt(Utc::now())),
+    )
+    .execute(&mut conn)
+    .await
+    .map_err(kassi_db::DbError::from)?;
+
+    if deleted == 0 {
+        return Err(ServerError::AuthenticationRequired);
+    }
+
+    // check if this address is already linked to any merchant
+    let existing = schema::signers::table
+        .filter(schema::signers::address.eq(&address))
+        .select(Signer::as_select())
+        .first::<Signer>(&mut conn)
+        .await
+        .optional()
+        .map_err(kassi_db::DbError::from)?;
+
+    if existing.is_some() {
+        return Err(ServerError::Conflict(
+            "wallet is already linked to an account".into(),
+        ));
+    }
+
+    let sig_id = EntityId::new(EntityPrefix::Signer).to_string();
+
+    kassi_db::diesel::insert_into(schema::signers::table)
+        .values(NewSigner {
+            id: &sig_id,
+            merchant_id: &session.merchant_id,
+            address: &address,
+            signer_type: &signer_type,
+        })
+        .execute(&mut conn)
+        .await
+        .map_err(kassi_db::DbError::from)?;
+
+    Ok(ApiSuccess {
+        data: LinkResponse {
+            signer_id: sig_id,
+            address,
+            signer_type,
+        },
     })
 }
 
