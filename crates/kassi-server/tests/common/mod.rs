@@ -19,8 +19,12 @@ pub async fn test_state() -> AppState {
             database_url: String::new(),
             session_jwt_secret: "test-secret-that-is-long-enough-for-hs256".into(),
             api_key_prefix: "kassi:test:".into(),
+            infisical_client_id: String::new(),
+            infisical_client_secret: String::new(),
+            infisical_project_id: String::new(),
             port: 3000,
         },
+        kms: None,
     }
 }
 

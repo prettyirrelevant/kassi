@@ -2650,6 +2650,7 @@ version = "0.1.0"
 dependencies = [
  "alloy",
  "axum",
+ "base64",
  "bs58",
  "chrono",
  "ed25519-dalek 2.2.0",
@@ -2659,6 +2660,7 @@ dependencies = [
  "jsonwebtoken",
  "k256",
  "kassi-db",
+ "kassi-signer",
  "kassi-types",
  "nanoid",
  "rand_core 0.6.4",

@@ -41,6 +41,7 @@ pub struct MerchantConfig {
     pub id: String,
     pub merchant_id: String,
     pub api_key_hash: Option<String>,
+    pub encrypted_seed: Option<String>,
     pub webhook_secret: String,
     pub webhook_url: Option<String>,
     pub created_at: DateTime<Utc>,
@@ -52,6 +53,7 @@ pub struct MerchantConfig {
 pub struct NewMerchantConfig<'a> {
     pub id: &'a str,
     pub merchant_id: &'a str,
+    pub encrypted_seed: Option<&'a str>,
     pub webhook_secret: &'a str,
 }
 
@@ -127,6 +129,15 @@ pub struct DepositAddress {
     pub created_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Insertable)]
+#[diesel(table_name = schema::deposit_addresses)]
+pub struct NewDepositAddress<'a> {
+    pub id: &'a str,
+    pub merchant_id: &'a str,
+    pub label: Option<&'a str>,
+    pub address_type: &'a str,
+}
+
 // -- network_addresses --
 
 #[derive(Debug, Clone, Queryable, Selectable)]
@@ -136,6 +147,16 @@ pub struct NetworkAddress {
     pub deposit_address_id: String,
     pub network_id: String,
     pub address: String,
+    pub derivation_index: i32,
+}
+
+#[derive(Debug, Insertable)]
+#[diesel(table_name = schema::network_addresses)]
+pub struct NewNetworkAddress<'a> {
+    pub id: &'a str,
+    pub deposit_address_id: &'a str,
+    pub network_id: &'a str,
+    pub address: &'a str,
     pub derivation_index: i32,
 }
 

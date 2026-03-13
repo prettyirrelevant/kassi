@@ -5,10 +5,12 @@ edition = "2021"
 
 [dependencies]
 kassi-db = { path = "../kassi-db" }
+kassi-signer = { path = "../kassi-signer" }
 kassi-types = { path = "../kassi-types" }
 
 alloy = { version = "1", features = ["k256", "signers"] }
 axum = "0.8"
+base64 = "0.22"
 bs58 = "0.5"
 chrono = "0.4"
 ed25519-dalek = { version = "2", features = ["std"] }

@@ -66,6 +66,7 @@ diesel::table! {
         id -> Text,
         merchant_id -> Text,
         api_key_hash -> Nullable<Text>,
+        encrypted_seed -> Nullable<Text>,
         webhook_secret -> Text,
         webhook_url -> Nullable<Text>,
         created_at -> Timestamptz,

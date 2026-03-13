@@ -1,4 +1,5 @@
 pub mod auth;
+mod deposit_addresses;
 mod health;
 mod merchants;
 mod settlement_destinations;
@@ -13,4 +14,5 @@ pub fn routes() -> Router<AppState> {
         .merge(auth::routes())
         .merge(merchants::routes())
         .merge(settlement_destinations::routes())
+        .merge(deposit_addresses::routes())
 }

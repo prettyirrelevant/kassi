@@ -4,9 +4,12 @@ pub mod extractors;
 pub mod response;
 pub mod routes;
 
+use std::sync::Arc;
+
 use axum::http::Method;
 use axum::Router;
 use kassi_db::DbPool;
+use kassi_signer::InfisicalKms;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
@@ -14,6 +17,7 @@ use tower_http::trace::TraceLayer;
 pub struct AppState {
     pub db: DbPool,
     pub config: config::Config,
+    pub kms: Option<Arc<InfisicalKms>>,
 }
 
 pub fn app(state: AppState) -> Router {

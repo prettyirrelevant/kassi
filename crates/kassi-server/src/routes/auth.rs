@@ -6,9 +6,9 @@ use axum::{Json, Router};
 use chrono::{Duration, Utc};
 use ed25519_dalek::Verifier;
 use jsonwebtoken::{encode, EncodingKey, Header};
-use kassi_db::diesel::prelude::*;
 use kassi_db::diesel_async::RunQueryDsl;
-use kassi_db::models::{NewMerchant, NewMerchantConfig, NewNonce, NewSigner, Signer};
+use kassi_db::models::NewNonce;
+use kassi_db::queries::CreateMerchantParams;
 use kassi_db::schema;
 use kassi_types::{EntityId, EntityPrefix};
 use serde::{Deserialize, Serialize};
@@ -109,91 +109,56 @@ async fn verify(
         .await
         .map_err(|e| kassi_db::DbError::Pool(e.to_string()))?;
 
-    // consume the nonce (delete it, confirming it existed and hasn't expired)
-    let deleted = kassi_db::diesel::delete(
-        schema::nonces::table
-            .filter(schema::nonces::nonce.eq(&nonce))
-            .filter(schema::nonces::expires_at.gt(Utc::now())),
-    )
-    .execute(&mut conn)
-    .await
-    .map_err(kassi_db::DbError::from)?;
-
-    if deleted == 0 {
+    if !kassi_db::queries::consume_nonce(&mut conn, &nonce).await? {
         return Err(ServerError::AuthenticationRequired);
     }
 
-    // find existing signer or create merchant + signer
-    let merchant_id = if let Some(signer) = schema::signers::table
-        .filter(schema::signers::address.eq(&address))
-        .select(Signer::as_select())
-        .first::<Signer>(&mut conn)
-        .await
-        .optional()
-        .map_err(kassi_db::DbError::from)?
+    let merchant_id = if let Some(signer) =
+        kassi_db::queries::find_signer_by_address(&mut conn, &address).await?
     {
         signer.merchant_id
     } else {
         let mer_id = EntityId::new(EntityPrefix::Merchant).to_string();
-        let mcfg_id = EntityId::new(EntityPrefix::MerchantConfig).to_string();
-        let sig_id = EntityId::new(EntityPrefix::Signer).to_string();
-        let webhook_secret = nanoid::nanoid!(32);
 
-        conn.build_transaction()
-            .run(|conn| {
-                let mer_id = mer_id.clone();
-                let mcfg_id = mcfg_id.clone();
-                let sig_id = sig_id.clone();
-                let webhook_secret = webhook_secret.clone();
-                let address = address.clone();
-                let signer_type = signer_type.clone();
+        let encrypted_seed = if let Some(kms) = &state.kms {
+            Some(
+                kassi_signer::create_merchant_seed(kms, &mer_id)
+                    .await
+                    .map_err(|e| {
+                        ServerError::BadRequest(format!("failed to create merchant seed: {e}"))
+                    })?,
+            )
+        } else {
+            None
+        };
 
-                Box::pin(async move {
-                    kassi_db::diesel::insert_into(schema::merchants::table)
-                        .values(NewMerchant { id: &mer_id })
-                        .execute(conn)
-                        .await?;
-
-                    kassi_db::diesel::insert_into(schema::merchant_configs::table)
-                        .values(NewMerchantConfig {
-                            id: &mcfg_id,
-                            merchant_id: &mer_id,
-                            webhook_secret: &webhook_secret,
-                        })
-                        .execute(conn)
-                        .await?;
-
-                    kassi_db::diesel::insert_into(schema::signers::table)
-                        .values(NewSigner {
-                            id: &sig_id,
-                            merchant_id: &mer_id,
-                            address: &address,
-                            signer_type: &signer_type,
-                        })
-                        .execute(conn)
-                        .await?;
-
-                    Ok::<_, kassi_db::diesel::result::Error>(())
-                })
-            })
-            .await
-            .map_err(kassi_db::DbError::from)?;
+        kassi_db::queries::create_merchant_with_config(
+            &mut conn,
+            CreateMerchantParams {
+                merchant_id: &mer_id,
+                config_id: EntityId::new(EntityPrefix::MerchantConfig).as_ref(),
+                signer_id: EntityId::new(EntityPrefix::Signer).as_ref(),
+                encrypted_seed: encrypted_seed.as_deref(),
+                webhook_secret: &nanoid::nanoid!(32),
+                signer_address: &address,
+                signer_type: &signer_type,
+            },
+        )
+        .await?;
 
         mer_id
     };
 
     let now = Utc::now();
-    let claims = Claims {
-        merchant_id: merchant_id.clone(),
-        signer_address: address,
-        signer_type,
-        iat: now.timestamp(),
-        exp: (now + Duration::days(JWT_EXPIRY_DAYS)).timestamp(),
-    };
-
     let token = encode(
         &Header::default(),
-        &claims,
+        &Claims {
+            merchant_id: merchant_id.clone(),
+            signer_address: address,
+            signer_type,
+            iat: now.timestamp(),
+            exp: (now + Duration::days(JWT_EXPIRY_DAYS)).timestamp(),
+        },
         &EncodingKey::from_secret(state.config.session_jwt_secret.as_bytes()),
     )
     .map_err(|e| ServerError::BadRequest(format!("failed to create token: {e}")))?;
@@ -222,30 +187,14 @@ async fn link(
         .await
         .map_err(|e| kassi_db::DbError::Pool(e.to_string()))?;
 
-    // consume the nonce
-    let deleted = kassi_db::diesel::delete(
-        schema::nonces::table
-            .filter(schema::nonces::nonce.eq(&nonce))
-            .filter(schema::nonces::expires_at.gt(Utc::now())),
-    )
-    .execute(&mut conn)
-    .await
-    .map_err(kassi_db::DbError::from)?;
-
-    if deleted == 0 {
+    if !kassi_db::queries::consume_nonce(&mut conn, &nonce).await? {
         return Err(ServerError::AuthenticationRequired);
     }
 
-    // check if this address is already linked to any merchant
-    let existing = schema::signers::table
-        .filter(schema::signers::address.eq(&address))
-        .select(Signer::as_select())
-        .first::<Signer>(&mut conn)
-        .await
-        .optional()
-        .map_err(kassi_db::DbError::from)?;
-
-    if existing.is_some() {
+    if kassi_db::queries::find_signer_by_address(&mut conn, &address)
+        .await?
+        .is_some()
+    {
         return Err(ServerError::Conflict(
             "wallet is already linked to an account".into(),
         ));
@@ -254,7 +203,7 @@ async fn link(
     let sig_id = EntityId::new(EntityPrefix::Signer).to_string();
 
     kassi_db::diesel::insert_into(schema::signers::table)
-        .values(NewSigner {
+        .values(kassi_db::models::NewSigner {
             id: &sig_id,
             merchant_id: &session.merchant_id,
             address: &address,

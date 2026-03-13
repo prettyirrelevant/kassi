@@ -189,7 +189,7 @@ async fn create_settlement_destination(
         .await
         .map_err(kassi_db::DbError::from)?;
 
-    if existing_count != body.network_ids.len() as i64 {
+    if existing_count != i64::try_from(body.network_ids.len()).unwrap_or(i64::MAX) {
         return Err(ServerError::ValidationFailed(vec![ValidationDetail {
             field: "network_ids".into(),
             code: "invalid_field_value",

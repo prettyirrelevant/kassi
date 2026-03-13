@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 
@@ -19,6 +21,14 @@ async fn main() {
         .await
         .expect("failed to create database pool");
 
+    let kms = kassi_signer::InfisicalKms::login(
+        &config.infisical_client_id,
+        &config.infisical_client_secret,
+        &config.infisical_project_id,
+    )
+    .await
+    .expect("failed to authenticate with infisical KMS");
+
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], config.port));
     let listener = TcpListener::bind(addr)
         .await
@@ -26,7 +36,13 @@ async fn main() {
 
     tracing::info!("listening on {addr}");
 
-    axum::serve(listener, app(AppState { db, config }))
+    let state = AppState {
+        db,
+        config,
+        kms: Some(Arc::new(kms)),
+    };
+
+    axum::serve(listener, app(state))
         .with_graceful_shutdown(shutdown_signal())
         .await
         .expect("server error");
