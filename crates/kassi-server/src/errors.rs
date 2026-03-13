@@ -36,6 +36,9 @@ pub enum ServerError {
     #[error("you do not have permission to access this resource.")]
     Forbidden,
 
+    #[error("wallet signature verification failed.")]
+    InvalidSignature,
+
     #[error("no {entity} found with id '{id}'.")]
     NotFound { entity: &'static str, id: String },
 
@@ -58,6 +61,7 @@ impl ServerError {
             Self::RouteNotFound => (StatusCode::NOT_FOUND, "route_not_found"),
             Self::AuthenticationRequired => (StatusCode::UNAUTHORIZED, "authentication_required"),
             Self::Forbidden => (StatusCode::FORBIDDEN, "forbidden"),
+            Self::InvalidSignature => (StatusCode::UNAUTHORIZED, "invalid_signature"),
             Self::NotFound { .. } => (StatusCode::NOT_FOUND, "resource_not_found"),
             Self::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
             Self::ValidationFailed(_) => (StatusCode::BAD_REQUEST, "validation_failed"),
@@ -85,6 +89,9 @@ impl IntoResponse for ServerError {
                 Cow::Borrowed("you do not have permission to access this resource."),
                 None,
             ),
+            Self::InvalidSignature => {
+                (Cow::Borrowed("wallet signature verification failed."), None)
+            }
             Self::NotFound { entity, id } => (
                 Cow::Owned(format!("no {entity} found with id '{id}'.")),
                 None,

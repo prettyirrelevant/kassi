@@ -36,10 +36,7 @@ async fn request(
         builder.body(axum::body::Body::empty()).unwrap()
     };
 
-    let resp = kassi_server::app(state.clone())
-        .oneshot(req)
-        .await
-        .unwrap();
+    let resp = kassi_server::app(state.clone()).oneshot(req).await.unwrap();
 
     let status = resp.status();
     let body = resp.into_body().collect().await.unwrap().to_bytes();
@@ -167,8 +164,7 @@ mod api_key_auth {
         let state = test_state().await;
         let (token, merchant_id) = authenticate(&state).await;
 
-        let (_, json) =
-            request(&state, "POST", "/merchants/me/rotate-key", &token, None).await;
+        let (_, json) = request(&state, "POST", "/merchants/me/rotate-key", &token, None).await;
         let api_key = json["data"]["api_key"].as_str().unwrap().to_string();
 
         let mut parts = api_key_parts(&api_key);
@@ -209,12 +205,10 @@ mod rotate_key {
         let state = test_state().await;
         let (token, _) = authenticate(&state).await;
 
-        let (_, json1) =
-            request(&state, "POST", "/merchants/me/rotate-key", &token, None).await;
+        let (_, json1) = request(&state, "POST", "/merchants/me/rotate-key", &token, None).await;
         let old_key = json1["data"]["api_key"].as_str().unwrap().to_string();
 
-        let (_, json2) =
-            request(&state, "POST", "/merchants/me/rotate-key", &token, None).await;
+        let (_, json2) = request(&state, "POST", "/merchants/me/rotate-key", &token, None).await;
         let new_key = json2["data"]["api_key"].as_str().unwrap().to_string();
 
         assert_ne!(old_key, new_key);
@@ -253,12 +247,10 @@ mod get_merchant {
         let state = test_state().await;
         let (token, merchant_id) = authenticate(&state).await;
 
-        let (_, json) =
-            request(&state, "POST", "/merchants/me/rotate-key", &token, None).await;
+        let (_, json) = request(&state, "POST", "/merchants/me/rotate-key", &token, None).await;
         let api_key = json["data"]["api_key"].as_str().unwrap();
 
-        let (status, json) =
-            request_with_api_key(&state, "GET", "/merchants/me", api_key).await;
+        let (status, json) = request_with_api_key(&state, "GET", "/merchants/me", api_key).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(json["data"]["id"].as_str().unwrap(), merchant_id);
     }
@@ -391,8 +383,14 @@ mod rotate_webhook_secret {
         let state = test_state().await;
         let (token, _) = authenticate(&state).await;
 
-        let (status, json) =
-            request(&state, "POST", "/merchants/me/rotate-webhook-secret", &token, None).await;
+        let (status, json) = request(
+            &state,
+            "POST",
+            "/merchants/me/rotate-webhook-secret",
+            &token,
+            None,
+        )
+        .await;
         assert_eq!(status, StatusCode::OK);
         assert!(json["data"]["webhook_secret"].is_string());
         assert!(!json["data"]["webhook_secret"].as_str().unwrap().is_empty());
@@ -403,10 +401,22 @@ mod rotate_webhook_secret {
         let state = test_state().await;
         let (token, _) = authenticate(&state).await;
 
-        let (_, json1) =
-            request(&state, "POST", "/merchants/me/rotate-webhook-secret", &token, None).await;
-        let (_, json2) =
-            request(&state, "POST", "/merchants/me/rotate-webhook-secret", &token, None).await;
+        let (_, json1) = request(
+            &state,
+            "POST",
+            "/merchants/me/rotate-webhook-secret",
+            &token,
+            None,
+        )
+        .await;
+        let (_, json2) = request(
+            &state,
+            "POST",
+            "/merchants/me/rotate-webhook-secret",
+            &token,
+            None,
+        )
+        .await;
 
         assert_ne!(
             json1["data"]["webhook_secret"].as_str().unwrap(),

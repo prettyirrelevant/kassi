@@ -77,9 +77,7 @@ pub async fn authenticate(state: &AppState) -> (String, String) {
 }
 
 /// Signs in with a fresh EVM wallet and returns `(token, merchant_id, signing_key)`.
-pub async fn authenticate_with_key(
-    state: &AppState,
-) -> (String, String, k256::ecdsa::SigningKey) {
+pub async fn authenticate_with_key(state: &AppState) -> (String, String, k256::ecdsa::SigningKey) {
     let key = k256::ecdsa::SigningKey::random(&mut rand_core::OsRng);
     let address = eth_address(&key);
 

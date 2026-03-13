@@ -273,10 +273,7 @@ async fn link(
     })
 }
 
-fn verify_evm(
-    message: &str,
-    signature: &str,
-) -> Result<(String, String, String), ServerError> {
+fn verify_evm(message: &str, signature: &str) -> Result<(String, String, String), ServerError> {
     let expected: Address = message
         .lines()
         .nth(1)

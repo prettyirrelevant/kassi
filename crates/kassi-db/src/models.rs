@@ -68,6 +68,15 @@ pub struct SettlementDestination {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Insertable)]
+#[diesel(table_name = schema::settlement_destinations)]
+pub struct NewSettlementDestination<'a> {
+    pub id: &'a str,
+    pub merchant_id: &'a str,
+    pub network_id: &'a str,
+    pub address: &'a str,
+}
+
 // -- signers --
 
 #[derive(Debug, Clone, Queryable, Selectable)]

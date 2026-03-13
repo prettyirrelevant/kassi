@@ -1,6 +1,7 @@
 pub mod auth;
 mod health;
 mod merchants;
+mod settlement_destinations;
 
 use axum::Router;
 
@@ -11,4 +12,5 @@ pub fn routes() -> Router<AppState> {
         .merge(health::routes())
         .merge(auth::routes())
         .merge(merchants::routes())
+        .merge(settlement_destinations::routes())
 }

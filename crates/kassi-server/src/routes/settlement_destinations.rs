@@ -204,9 +204,7 @@ async fn create_settlement_destination(
         .await
         .optional()
         .map_err(kassi_db::DbError::from)?
-        .ok_or_else(|| {
-            ServerError::BadRequest("no signer found for this merchant.".into())
-        })?;
+        .ok_or_else(|| ServerError::BadRequest("no signer found for this merchant.".into()))?;
 
     let message = confirmation_message_create(&body.address, &body.network_ids);
     verify_confirmation_signature(&message, &body.signature, &signer)?;
@@ -322,9 +320,7 @@ async fn delete_settlement_destination(
         .await
         .optional()
         .map_err(kassi_db::DbError::from)?
-        .ok_or_else(|| {
-            ServerError::BadRequest("no signer found for this merchant.".into())
-        })?;
+        .ok_or_else(|| ServerError::BadRequest("no signer found for this merchant.".into()))?;
 
     let message = confirmation_message_delete(&dest.id);
     verify_confirmation_signature(&message, &body.signature, &signer)?;
