@@ -583,6 +583,61 @@ pub async fn get_webhook_delivery(
         .map_err(DbError::from)
 }
 
+/// Find a network address row by its on-chain address and network ID.
+///
+/// # Errors
+/// Returns `DbError::Query` if the query fails.
+pub async fn find_network_address(
+    conn: &mut AsyncPgConnection,
+    address: &str,
+    network_id: &str,
+) -> Result<Option<NetworkAddress>, DbError> {
+    schema::network_addresses::table
+        .filter(schema::network_addresses::address.eq(address))
+        .filter(schema::network_addresses::network_id.eq(network_id))
+        .select(NetworkAddress::as_select())
+        .first::<NetworkAddress>(conn)
+        .await
+        .optional()
+        .map_err(DbError::from)
+}
+
+/// Load all network addresses grouped with their network ID.
+///
+/// # Errors
+/// Returns `DbError::Query` if the query fails.
+pub async fn all_network_addresses(
+    conn: &mut AsyncPgConnection,
+) -> Result<Vec<(String, String)>, DbError> {
+    schema::network_addresses::table
+        .select((
+            schema::network_addresses::network_id,
+            schema::network_addresses::address,
+        ))
+        .load::<(String, String)>(conn)
+        .await
+        .map_err(DbError::from)
+}
+
+/// Count jobs grouped by queue and status.
+///
+/// # Errors
+/// Returns `DbError::Query` if the query fails.
+pub async fn job_counts_by_queue_and_status(
+    conn: &mut AsyncPgConnection,
+) -> Result<Vec<(String, String, i64)>, DbError> {
+    schema::jobs::table
+        .group_by((schema::jobs::queue, schema::jobs::status))
+        .select((
+            schema::jobs::queue,
+            schema::jobs::status,
+            diesel::dsl::count(schema::jobs::id),
+        ))
+        .load::<(String, String, i64)>(conn)
+        .await
+        .map_err(DbError::from)
+}
+
 /// Load refund ledger entries for a merchant, ordered by `created_at` desc.
 /// Joins through `deposit_addresses` to scope by merchant.
 ///

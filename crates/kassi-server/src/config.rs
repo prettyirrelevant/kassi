@@ -26,6 +26,8 @@ pub struct Config {
     pub quote_lock_duration_secs: i64,
     #[serde(default = "default_price_cache_stale_secs")]
     pub price_cache_stale_secs: i64,
+    pub internal_basic_auth_token: String,
+    pub admin_basic_auth_token: String,
 }
 
 impl Config {

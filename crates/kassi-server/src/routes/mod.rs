@@ -1,7 +1,9 @@
+mod admin;
 mod assets;
 pub mod auth;
 mod deposit_addresses;
 mod health;
+mod internal;
 mod merchants;
 mod payment_intents;
 mod prices;
@@ -26,4 +28,6 @@ pub fn routes() -> Router<AppState> {
         .merge(assets::routes())
         .merge(prices::routes())
         .merge(webhooks::routes())
+        .merge(internal::routes())
+        .merge(admin::routes())
 }

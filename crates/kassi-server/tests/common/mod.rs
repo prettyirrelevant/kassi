@@ -28,6 +28,8 @@ fn maintenance_url() -> String {
 }
 
 fn test_config() -> Config {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+
     Config {
         database_url: String::new(),
         session_jwt_secret: "test-secret-that-is-long-enough-for-hs256".into(),
@@ -38,6 +40,8 @@ fn test_config() -> Config {
         port: 3000,
         quote_lock_duration_secs: 1800,
         price_cache_stale_secs: 300,
+        internal_basic_auth_token: STANDARD.encode("kassi:internal-secret"),
+        admin_basic_auth_token: STANDARD.encode("kassi:admin-secret"),
     }
 }
 
@@ -264,6 +268,41 @@ pub async fn request(
     };
 
     let builder = builder.header("authorization", format!("Bearer {token}"));
+
+    let req = if let Some(json) = body {
+        builder
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(serde_json::to_vec(&json).unwrap()))
+            .unwrap()
+    } else {
+        builder.body(axum::body::Body::empty()).unwrap()
+    };
+
+    let resp = kassi_server::app(state.clone()).oneshot(req).await.unwrap();
+    let status = resp.status();
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    (status, serde_json::from_slice(&bytes).unwrap_or_default())
+}
+
+/// Send a basic-auth request and return `(status, json)`.
+pub async fn request_basic_auth(
+    state: &AppState,
+    method: &str,
+    path: &str,
+    username: &str,
+    password: &str,
+    body: Option<serde_json::Value>,
+) -> (StatusCode, serde_json::Value) {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+
+    let builder = match method {
+        "GET" => Request::get(path),
+        "POST" => Request::post(path),
+        _ => panic!("unsupported HTTP method: {method}"),
+    };
+
+    let credentials = STANDARD.encode(format!("{username}:{password}"));
+    let builder = builder.header("authorization", format!("Basic {credentials}"));
 
     let req = if let Some(json) = body {
         builder

@@ -135,3 +135,46 @@ impl FromRequestParts<AppState> for AnyAuth {
         })
     }
 }
+
+fn verify_basic_auth(parts: &Parts, expected_token: &str) -> Result<(), ServerError> {
+    let token = parts
+        .headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Basic "))
+        .ok_or(ServerError::AuthenticationRequired)?;
+
+    if token == expected_token {
+        Ok(())
+    } else {
+        Err(ServerError::AuthenticationRequired)
+    }
+}
+
+pub struct InternalAuth;
+
+impl FromRequestParts<AppState> for InternalAuth {
+    type Rejection = ServerError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        verify_basic_auth(parts, &state.config.internal_basic_auth_token)?;
+        Ok(Self)
+    }
+}
+
+pub struct AdminAuth;
+
+impl FromRequestParts<AppState> for AdminAuth {
+    type Rejection = ServerError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        verify_basic_auth(parts, &state.config.admin_basic_auth_token)?;
+        Ok(Self)
+    }
+}

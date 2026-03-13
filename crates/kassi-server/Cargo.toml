@@ -30,6 +30,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 [dev-dependencies]
 alloy = { version = "1", features = ["k256"] }
+base64 = "0.22"
 http-body-util = "0.1"
 hyper = "1"
 k256 = { version = "0.13", features = ["ecdsa"] }
