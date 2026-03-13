@@ -1,3 +1,4 @@
+use alloy::hex;
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use jsonwebtoken::{decode, DecodingKey, Validation};

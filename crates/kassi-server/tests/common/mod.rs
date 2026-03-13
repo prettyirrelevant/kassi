@@ -1,5 +1,7 @@
 #![allow(dead_code, clippy::missing_panics_doc, clippy::must_use_candidate)]
 
+use alloy::hex;
+use alloy::primitives::{keccak256, Address};
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use kassi_server::config::Config;
@@ -22,14 +24,14 @@ pub async fn test_state() -> AppState {
     }
 }
 
-pub fn eth_address(key: &k256::ecdsa::SigningKey) -> alloy_primitives::Address {
+pub fn eth_address(key: &k256::ecdsa::SigningKey) -> Address {
     let pubkey = key.verifying_key().to_encoded_point(false);
-    alloy_primitives::Address::from_raw_public_key(&pubkey.as_bytes()[1..])
+    Address::from_raw_public_key(&pubkey.as_bytes()[1..])
 }
 
 pub fn eip191_sign(message: &str, key: &k256::ecdsa::SigningKey) -> String {
     let prefixed = format!("\x19Ethereum Signed Message:\n{}{}", message.len(), message);
-    let hash = alloy_primitives::keccak256(prefixed.as_bytes());
+    let hash = keccak256(prefixed.as_bytes());
     let (sig, recid) = key.sign_prehash_recoverable(hash.as_slice()).unwrap();
     let mut bytes = [0u8; 65];
     bytes[..64].copy_from_slice(&sig.to_bytes());
@@ -37,7 +39,7 @@ pub fn eip191_sign(message: &str, key: &k256::ecdsa::SigningKey) -> String {
     format!("0x{}", hex::encode(bytes))
 }
 
-pub fn siwe_message(address: &alloy_primitives::Address, nonce: &str) -> String {
+pub fn siwe_message(address: &Address, nonce: &str) -> String {
     let addr = address.to_checksum(None);
     format!(
         "localhost wants you to sign in with your Ethereum account:\n\
@@ -70,6 +72,14 @@ pub fn siws_message(address: &str, nonce: &str) -> String {
 
 /// Signs in with a fresh EVM wallet and returns `(token, merchant_id)`.
 pub async fn authenticate(state: &AppState) -> (String, String) {
+    let (token, merchant_id, _) = authenticate_with_key(state).await;
+    (token, merchant_id)
+}
+
+/// Signs in with a fresh EVM wallet and returns `(token, merchant_id, signing_key)`.
+pub async fn authenticate_with_key(
+    state: &AppState,
+) -> (String, String, k256::ecdsa::SigningKey) {
     let key = k256::ecdsa::SigningKey::random(&mut rand_core::OsRng);
     let address = eth_address(&key);
 
@@ -108,5 +118,6 @@ pub async fn authenticate(state: &AppState) -> (String, String) {
     (
         json["data"]["token"].as_str().unwrap().to_string(),
         json["data"]["merchant_id"].as_str().unwrap().to_string(),
+        key,
     )
 }

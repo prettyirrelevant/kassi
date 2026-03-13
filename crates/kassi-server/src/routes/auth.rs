@@ -1,3 +1,5 @@
+use alloy::hex;
+use alloy::primitives::Address;
 use axum::extract::State;
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -68,7 +70,7 @@ pub fn routes() -> Router<AppState> {
 async fn get_nonce(
     State(state): State<AppState>,
 ) -> Result<ApiSuccess<NonceResponse>, ServerError> {
-    let nonce = siwe::generate_nonce();
+    let nonce = nanoid::nanoid!();
     let mut conn = state
         .db
         .get()
@@ -94,7 +96,7 @@ async fn verify(
     Json(body): Json<VerifyRequest>,
 ) -> Result<ApiSuccess<VerifyResponse>, ServerError> {
     let (address, nonce, signer_type) = if body.message.contains("Ethereum account:") {
-        verify_evm(&body.message, &body.signature).await?
+        verify_evm(&body.message, &body.signature)?
     } else if body.message.contains("Solana account:") {
         verify_solana(&body.message, &body.signature)?
     } else {
@@ -207,7 +209,7 @@ async fn link(
     Json(body): Json<LinkRequest>,
 ) -> Result<ApiSuccess<LinkResponse>, ServerError> {
     let (address, nonce, signer_type) = if body.message.contains("Ethereum account:") {
-        verify_evm(&body.message, &body.signature).await?
+        verify_evm(&body.message, &body.signature)?
     } else if body.message.contains("Solana account:") {
         verify_solana(&body.message, &body.signature)?
     } else {
@@ -271,26 +273,40 @@ async fn link(
     })
 }
 
-async fn verify_evm(
+fn verify_evm(
     message: &str,
     signature: &str,
 ) -> Result<(String, String, String), ServerError> {
-    let msg: siwe::Message = message
+    let expected: Address = message
+        .lines()
+        .nth(1)
+        .map(str::trim)
+        .filter(|a| !a.is_empty())
+        .ok_or_else(|| ServerError::BadRequest("missing address in SIWE message".into()))?
         .parse()
-        .map_err(|_| ServerError::BadRequest("invalid SIWE message".into()))?;
+        .map_err(|_| ServerError::BadRequest("invalid Ethereum address in message".into()))?;
+
+    let nonce = message
+        .lines()
+        .find_map(|l| l.strip_prefix("Nonce: "))
+        .ok_or_else(|| ServerError::BadRequest("missing nonce in SIWE message".into()))?;
 
     let sig_hex = signature.strip_prefix("0x").unwrap_or(signature);
     let sig_bytes = hex::decode(sig_hex)
         .map_err(|_| ServerError::BadRequest("invalid signature hex encoding".into()))?;
 
-    msg.verify(&sig_bytes, &siwe::VerificationOpts::default())
-        .await
+    let sig = alloy::primitives::Signature::try_from(sig_bytes.as_slice())
         .map_err(|_| ServerError::AuthenticationRequired)?;
 
-    let address = format!("0x{}", hex::encode(msg.address));
-    let nonce = msg.nonce.clone();
+    let recovered = sig
+        .recover_address_from_msg(message)
+        .map_err(|_| ServerError::AuthenticationRequired)?;
 
-    Ok((address, nonce, "evm".into()))
+    if recovered != expected {
+        return Err(ServerError::AuthenticationRequired);
+    }
+
+    Ok((expected.to_checksum(None), nonce.to_string(), "evm".into()))
 }
 
 fn verify_solana(message: &str, signature: &str) -> Result<(String, String, String), ServerError> {
