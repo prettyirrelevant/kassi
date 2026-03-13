@@ -3,8 +3,9 @@ use diesel_async::AsyncPgConnection;
 use diesel_async::RunQueryDsl;
 
 use crate::models::{
-    Asset, DepositAddress, MerchantConfig, Network, NetworkAddress, NewDepositAddress, NewMerchant,
-    NewMerchantConfig, NewNetworkAddress, NewSigner,
+    Asset, DepositAddress, Job, LedgerEntry, MerchantConfig, Network, NetworkAddress,
+    NewDepositAddress, NewJob, NewLedgerEntry, NewMerchant, NewMerchantConfig, NewNetworkAddress,
+    NewPaymentIntent, NewQuote, NewSigner, PaymentIntent, Quote,
 };
 use crate::schema;
 use crate::DbError;
@@ -311,5 +312,229 @@ pub async fn find_config_by_api_key_hash(
         .first::<MerchantConfig>(conn)
         .await
         .optional()
+        .map_err(DbError::from)
+}
+
+/// Insert a payment intent and return the created row.
+///
+/// # Errors
+/// Returns `DbError::Query` if the insert fails.
+pub async fn insert_payment_intent(
+    conn: &mut AsyncPgConnection,
+    values: NewPaymentIntent<'_>,
+) -> Result<PaymentIntent, DbError> {
+    diesel::insert_into(schema::payment_intents::table)
+        .values(values)
+        .returning(PaymentIntent::as_returning())
+        .get_result::<PaymentIntent>(conn)
+        .await
+        .map_err(DbError::from)
+}
+
+/// Insert a quote and return the created row.
+///
+/// # Errors
+/// Returns `DbError::Query` if the insert fails.
+pub async fn insert_quote(
+    conn: &mut AsyncPgConnection,
+    values: NewQuote<'_>,
+) -> Result<Quote, DbError> {
+    diesel::insert_into(schema::quotes::table)
+        .values(values)
+        .returning(Quote::as_returning())
+        .get_result::<Quote>(conn)
+        .await
+        .map_err(DbError::from)
+}
+
+/// Fetch a single payment intent by ID, scoped to a merchant.
+///
+/// # Errors
+/// Returns `DbError::Query` if the query fails.
+pub async fn get_payment_intent(
+    conn: &mut AsyncPgConnection,
+    id: &str,
+    merchant_id: &str,
+) -> Result<Option<PaymentIntent>, DbError> {
+    schema::payment_intents::table
+        .filter(schema::payment_intents::id.eq(id))
+        .filter(schema::payment_intents::merchant_id.eq(merchant_id))
+        .select(PaymentIntent::as_select())
+        .first::<PaymentIntent>(conn)
+        .await
+        .optional()
+        .map_err(DbError::from)
+}
+
+/// Load quotes for a set of payment intent IDs.
+///
+/// # Errors
+/// Returns `DbError::Query` if the query fails.
+pub async fn load_quotes_by_payment_intent_ids(
+    conn: &mut AsyncPgConnection,
+    payment_intent_ids: &[&str],
+) -> Result<Vec<Quote>, DbError> {
+    schema::quotes::table
+        .filter(schema::quotes::payment_intent_id.eq_any(payment_intent_ids))
+        .select(Quote::as_select())
+        .load::<Quote>(conn)
+        .await
+        .map_err(DbError::from)
+}
+
+/// Fetch an asset by its internal ID.
+///
+/// # Errors
+/// Returns `DbError::Query` if the query fails.
+pub async fn get_asset_by_id(
+    conn: &mut AsyncPgConnection,
+    id: &str,
+) -> Result<Option<Asset>, DbError> {
+    schema::assets::table
+        .filter(schema::assets::id.eq(id))
+        .filter(schema::assets::is_active.eq(true))
+        .select(Asset::as_select())
+        .first::<Asset>(conn)
+        .await
+        .optional()
+        .map_err(DbError::from)
+}
+
+/// Fetch the latest cached price for an asset and fiat currency.
+///
+/// # Errors
+/// Returns `DbError::Query` if the query fails.
+pub async fn get_latest_price(
+    conn: &mut AsyncPgConnection,
+    asset_id: &str,
+    fiat_currency: &str,
+) -> Result<Option<crate::models::PriceCache>, DbError> {
+    schema::price_cache::table
+        .filter(schema::price_cache::asset_id.eq(asset_id))
+        .filter(schema::price_cache::fiat_currency.eq(fiat_currency))
+        .order(schema::price_cache::fetched_at.desc())
+        .select(crate::models::PriceCache::as_select())
+        .first::<crate::models::PriceCache>(conn)
+        .await
+        .optional()
+        .map_err(DbError::from)
+}
+
+/// Insert or update a price cache entry.
+///
+/// # Errors
+/// Returns `DbError::Query` if the insert fails.
+pub async fn upsert_price_cache(
+    conn: &mut AsyncPgConnection,
+    id: &str,
+    asset_id: &str,
+    fiat_currency: &str,
+    price: &str,
+    source: &str,
+    fetched_at: chrono::DateTime<chrono::Utc>,
+) -> Result<(), DbError> {
+    diesel::insert_into(schema::price_cache::table)
+        .values((
+            schema::price_cache::id.eq(id),
+            schema::price_cache::asset_id.eq(asset_id),
+            schema::price_cache::fiat_currency.eq(fiat_currency),
+            schema::price_cache::price.eq(price),
+            schema::price_cache::source.eq(source),
+            schema::price_cache::fetched_at.eq(fetched_at),
+        ))
+        .execute(conn)
+        .await
+        .map_err(DbError::from)?;
+    Ok(())
+}
+
+/// Insert a ledger entry and return the created row.
+///
+/// # Errors
+/// Returns `DbError::Query` if the insert fails.
+pub async fn insert_ledger_entry(
+    conn: &mut AsyncPgConnection,
+    values: NewLedgerEntry<'_>,
+) -> Result<LedgerEntry, DbError> {
+    diesel::insert_into(schema::ledger_entries::table)
+        .values(values)
+        .returning(LedgerEntry::as_returning())
+        .get_result::<LedgerEntry>(conn)
+        .await
+        .map_err(DbError::from)
+}
+
+/// Insert a job and return the created row.
+///
+/// # Errors
+/// Returns `DbError::Query` if the insert fails.
+pub async fn insert_job(
+    conn: &mut AsyncPgConnection,
+    values: NewJob<'_>,
+) -> Result<Job, DbError> {
+    diesel::insert_into(schema::jobs::table)
+        .values(values)
+        .returning(Job::as_returning())
+        .get_result::<Job>(conn)
+        .await
+        .map_err(DbError::from)
+}
+
+/// Fetch a single deposit address by ID (unscoped, for internal use).
+///
+/// # Errors
+/// Returns `DbError::Query` if the query fails.
+pub async fn get_deposit_address_unscoped(
+    conn: &mut AsyncPgConnection,
+    id: &str,
+) -> Result<Option<DepositAddress>, DbError> {
+    schema::deposit_addresses::table
+        .filter(schema::deposit_addresses::id.eq(id))
+        .select(DepositAddress::as_select())
+        .first::<DepositAddress>(conn)
+        .await
+        .optional()
+        .map_err(DbError::from)
+}
+
+/// Load refund ledger entries for a merchant, ordered by created_at desc.
+/// Joins through deposit_addresses to scope by merchant.
+///
+/// # Errors
+/// Returns `DbError::Query` if the query fails.
+pub async fn list_refund_ledger_entries(
+    conn: &mut AsyncPgConnection,
+    merchant_id: &str,
+    limit: i64,
+    cursor: Option<(&chrono::DateTime<chrono::Utc>, &str)>,
+) -> Result<Vec<(LedgerEntry, DepositAddress)>, DbError> {
+    let mut query = schema::ledger_entries::table
+        .inner_join(
+            schema::deposit_addresses::table
+                .on(schema::deposit_addresses::id.eq(schema::ledger_entries::deposit_address_id)),
+        )
+        .filter(schema::deposit_addresses::merchant_id.eq(merchant_id))
+        .filter(schema::ledger_entries::entry_type.eq("refund"))
+        .order((
+            schema::ledger_entries::created_at.desc(),
+            schema::ledger_entries::id.desc(),
+        ))
+        .select((LedgerEntry::as_select(), DepositAddress::as_select()))
+        .limit(limit)
+        .into_boxed();
+
+    if let Some((cursor_time, cursor_id)) = cursor {
+        query = query.filter(
+            schema::ledger_entries::created_at
+                .lt(cursor_time)
+                .or(schema::ledger_entries::created_at
+                    .eq(cursor_time)
+                    .and(schema::ledger_entries::id.lt(cursor_id))),
+        );
+    }
+
+    query
+        .load::<(LedgerEntry, DepositAddress)>(conn)
+        .await
         .map_err(DbError::from)
 }

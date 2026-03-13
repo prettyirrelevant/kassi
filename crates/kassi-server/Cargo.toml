@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 kassi-db = { path = "../kassi-db" }
 kassi-signer = { path = "../kassi-signer" }
+kassi-tokens = { path = "../kassi-tokens" }
 kassi-types = { path = "../kassi-types" }
 
 alloy = { version = "1", features = ["k256", "signers"] }
@@ -17,6 +18,7 @@ ed25519-dalek = { version = "2", features = ["std"] }
 envy = "0.4"
 jsonwebtoken = "9"
 nanoid = { workspace = true }
+rust_decimal = "1"
 serde = { workspace = true }
 serde_json = "1"
 sha2 = "0.10"

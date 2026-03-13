@@ -40,6 +40,7 @@ async fn main() {
         db,
         config,
         kms: Some(Arc::new(kassi_signer::KmsBackend::Infisical(kms))),
+        prices: Arc::new(kassi_server::prices::LivePriceFetcher::new()),
     };
 
     axum::serve(listener, app(state))

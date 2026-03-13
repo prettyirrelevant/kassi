@@ -1,6 +1,7 @@
 pub mod config;
 pub mod errors;
 pub mod extractors;
+pub mod prices;
 pub mod response;
 pub mod routes;
 
@@ -18,6 +19,7 @@ pub struct AppState {
     pub db: DbPool,
     pub config: config::Config,
     pub kms: Option<Arc<KmsBackend>>,
+    pub prices: Arc<dyn prices::PriceFetcher>,
 }
 
 pub fn app(state: AppState) -> Router {

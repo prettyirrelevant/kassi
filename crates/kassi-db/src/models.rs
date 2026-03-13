@@ -177,6 +177,17 @@ pub struct PaymentIntent {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Insertable)]
+#[diesel(table_name = schema::payment_intents)]
+pub struct NewPaymentIntent<'a> {
+    pub id: &'a str,
+    pub deposit_address_id: &'a str,
+    pub merchant_id: &'a str,
+    pub fiat_amount: &'a str,
+    pub fiat_currency: &'a str,
+    pub expires_at: DateTime<Utc>,
+}
+
 // -- quotes --
 
 #[derive(Debug, Clone, Queryable, Selectable)]
@@ -189,6 +200,17 @@ pub struct Quote {
     pub crypto_amount: String,
     pub expires_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Insertable)]
+#[diesel(table_name = schema::quotes)]
+pub struct NewQuote<'a> {
+    pub id: &'a str,
+    pub payment_intent_id: &'a str,
+    pub asset_id: &'a str,
+    pub exchange_rate: &'a str,
+    pub crypto_amount: &'a str,
+    pub expires_at: DateTime<Utc>,
 }
 
 // -- ledger_entries --
@@ -210,6 +232,22 @@ pub struct LedgerEntry {
     pub onchain_ref: String,
     pub reason: Option<String>,
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Insertable)]
+#[diesel(table_name = schema::ledger_entries)]
+pub struct NewLedgerEntry<'a> {
+    pub id: &'a str,
+    pub deposit_address_id: &'a str,
+    pub payment_intent_id: Option<&'a str>,
+    pub asset_id: &'a str,
+    pub network_id: &'a str,
+    pub entry_type: &'a str,
+    pub status: &'a str,
+    pub amount: &'a str,
+    pub destination: Option<&'a str>,
+    pub onchain_ref: &'a str,
+    pub reason: Option<&'a str>,
 }
 
 // -- webhook_deliveries --

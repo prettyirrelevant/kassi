@@ -1,6 +1,9 @@
 #![allow(dead_code, clippy::missing_panics_doc, clippy::must_use_candidate)]
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::{Arc, Mutex};
 
 use alloy::hex;
 use alloy::primitives::{keccak256, Address};
@@ -10,7 +13,9 @@ use kassi_db::diesel_async::AsyncConnection;
 use kassi_db::diesel_async::AsyncPgConnection;
 use kassi_db::diesel_async::SimpleAsyncConnection;
 use kassi_server::config::Config;
+use kassi_server::prices::PriceFetcher;
 use kassi_server::AppState;
+use kassi_tokens::{PricingError, TokenPrice};
 use tower::ServiceExt;
 
 const MIGRATION_0_DIESEL_SETUP: &str =
@@ -31,6 +36,50 @@ fn test_config() -> Config {
         infisical_client_secret: String::new(),
         infisical_project_id: String::new(),
         port: 3000,
+        quote_lock_duration_secs: 1800,
+    }
+}
+
+/// Test price fetcher that returns pre-configured prices.
+pub struct FakePriceFetcher {
+    prices: Mutex<HashMap<String, f64>>,
+}
+
+impl FakePriceFetcher {
+    pub fn new() -> Self {
+        Self {
+            prices: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn set_price(&self, coingecko_id: &str, usd_price: f64) {
+        self.prices
+            .lock()
+            .unwrap()
+            .insert(coingecko_id.to_string(), usd_price);
+    }
+}
+
+impl PriceFetcher for FakePriceFetcher {
+    fn fetch_prices(
+        &self,
+        coingecko_ids: &[String],
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<TokenPrice>, PricingError>> + Send + '_>> {
+        let ids: Vec<String> = coingecko_ids.to_vec();
+        Box::pin(async move {
+            let prices = self.prices.lock().unwrap();
+            ids.iter()
+                .map(|id| {
+                    prices
+                        .get(id)
+                        .map(|&usd_price| TokenPrice {
+                            coingecko_id: id.clone(),
+                            usd_price,
+                        })
+                        .ok_or_else(|| PricingError::NotFound(id.clone()))
+                })
+                .collect()
+        })
     }
 }
 
@@ -38,6 +87,7 @@ fn test_config() -> Config {
 /// construction, drops it when the struct goes out of scope.
 pub struct TestContext {
     pub state: AppState,
+    pub fake_prices: Arc<FakePriceFetcher>,
     db_name: String,
     maintenance_url: String,
 }
@@ -87,12 +137,16 @@ impl TestContext {
             .await
             .expect("failed to create test pool");
 
+        let fake_prices = Arc::new(FakePriceFetcher::new());
+
         Self {
             state: AppState {
                 db: pool,
                 config: test_config(),
                 kms,
+                prices: fake_prices.clone(),
             },
+            fake_prices,
             db_name,
             maintenance_url: base_url,
         }

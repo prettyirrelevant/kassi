@@ -4,6 +4,10 @@ fn default_port() -> u16 {
     3000
 }
 
+fn default_quote_lock_duration_secs() -> u64 {
+    1800 // 30 minutes
+}
+
 #[derive(Clone, Deserialize)]
 pub struct Config {
     pub database_url: String,
@@ -14,6 +18,8 @@ pub struct Config {
     pub infisical_project_id: String,
     #[serde(default = "default_port")]
     pub port: u16,
+    #[serde(default = "default_quote_lock_duration_secs")]
+    pub quote_lock_duration_secs: u64,
 }
 
 impl Config {
