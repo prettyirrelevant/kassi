@@ -1,6 +1,8 @@
 mod derivation;
 mod evm;
 mod infisical;
+#[cfg(any(test, feature = "test-utils"))]
+mod mock;
 mod solana;
 
 use std::fmt;
@@ -11,6 +13,8 @@ use zeroize::Zeroize;
 pub use derivation::{derive_evm_address, derive_solana_address};
 pub use evm::{encode_erc20_transfer, encode_multicall3, MULTICALL3_ADDRESS};
 pub use infisical::{InfisicalKms, KmsError};
+#[cfg(any(test, feature = "test-utils"))]
+pub use mock::MockKms;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Namespace {
@@ -42,22 +46,76 @@ pub enum SignerError {
     Signing(String),
 }
 
-/// Generate a new BIP-32 seed for a merchant, encrypt it via Infisical KMS,
+/// Trait abstracting KMS operations (create key, encrypt, decrypt).
+/// Implemented by `InfisicalKms` for production and `MockKms` for tests.
+#[allow(async_fn_in_trait)]
+pub trait Kms: Send + Sync {
+    /// Create a new encryption key with the given name.
+    async fn create_key(&self, name: &str) -> Result<(), KmsError>;
+
+    /// Encrypt plaintext bytes under the named key, returning ciphertext.
+    async fn encrypt(&self, name: &str, plaintext: &[u8]) -> Result<String, KmsError>;
+
+    /// Decrypt ciphertext under the named key, returning raw bytes.
+    async fn decrypt(&self, name: &str, ciphertext: &str) -> Result<Vec<u8>, KmsError>;
+}
+
+/// Concrete enum that dispatches to a real or mock KMS backend.
+/// Stored in `AppState` so handlers stay non-generic.
+pub enum KmsBackend {
+    Infisical(InfisicalKms),
+    #[cfg(any(test, feature = "test-utils"))]
+    Mock(MockKms),
+}
+
+impl Kms for KmsBackend {
+    async fn create_key(&self, name: &str) -> Result<(), KmsError> {
+        match self {
+            Self::Infisical(k) => k.create_key(name).await,
+            #[cfg(any(test, feature = "test-utils"))]
+            Self::Mock(k) => k.create_key(name).await,
+        }
+    }
+
+    async fn encrypt(&self, name: &str, plaintext: &[u8]) -> Result<String, KmsError> {
+        match self {
+            Self::Infisical(k) => k.encrypt(name, plaintext).await,
+            #[cfg(any(test, feature = "test-utils"))]
+            Self::Mock(k) => k.encrypt(name, plaintext).await,
+        }
+    }
+
+    async fn decrypt(&self, name: &str, ciphertext: &str) -> Result<Vec<u8>, KmsError> {
+        match self {
+            Self::Infisical(k) => k.decrypt(name, ciphertext).await,
+            #[cfg(any(test, feature = "test-utils"))]
+            Self::Mock(k) => k.decrypt(name, ciphertext).await,
+        }
+    }
+}
+
+/// Format the KMS key name for a merchant.
+#[must_use]
+pub fn key_name(merchant_id: &str) -> String {
+    format!("kassi-merchant-{merchant_id}")
+}
+
+/// Generate a new BIP-32 seed for a merchant, encrypt it via KMS,
 /// and return the ciphertext. The caller stores the ciphertext in the database.
 ///
 /// # Errors
 /// Returns `SignerError::Kms` if key creation or encryption fails.
 pub async fn create_merchant_seed(
-    kms: &InfisicalKms,
+    kms: &KmsBackend,
     merchant_id: &str,
 ) -> Result<String, SignerError> {
-    let key_name = InfisicalKms::key_name(merchant_id);
-    kms.create_key(&key_name).await?;
+    let kn = key_name(merchant_id);
+    kms.create_key(&kn).await?;
 
     let mut seed = [0u8; 64];
     rand::thread_rng().fill_bytes(&mut seed);
 
-    let ciphertext = kms.encrypt(&key_name, &seed).await?;
+    let ciphertext = kms.encrypt(&kn, &seed).await?;
     seed.zeroize();
 
     tracing::info!(merchant_id, "created merchant seed");
@@ -70,15 +128,15 @@ pub async fn create_merchant_seed(
 /// # Errors
 /// Returns `SignerError` if decryption or key derivation fails.
 pub async fn derive_address(
-    kms: &InfisicalKms,
+    kms: &KmsBackend,
     merchant_id: &str,
     encrypted_seed: &str,
     namespace: Namespace,
     chain_id: u64,
     index: u32,
 ) -> Result<String, SignerError> {
-    let key_name = InfisicalKms::key_name(merchant_id);
-    let mut seed = kms.decrypt(&key_name, encrypted_seed).await?;
+    let kn = key_name(merchant_id);
+    let mut seed = kms.decrypt(&kn, encrypted_seed).await?;
 
     let result = match namespace {
         Namespace::Evm => derive_evm_address(&seed, chain_id, index).map(|a| a.to_checksum(None)),
@@ -97,15 +155,15 @@ pub async fn derive_address(
 /// # Errors
 /// Returns `SignerError` if decryption, key derivation, or signing fails.
 pub async fn sign_evm_transaction(
-    kms: &InfisicalKms,
+    kms: &KmsBackend,
     merchant_id: &str,
     encrypted_seed: &str,
     chain_id: u64,
     index: u32,
     tx: alloy::rpc::types::TransactionRequest,
 ) -> Result<Vec<u8>, SignerError> {
-    let key_name = InfisicalKms::key_name(merchant_id);
-    let mut seed = kms.decrypt(&key_name, encrypted_seed).await?;
+    let kn = key_name(merchant_id);
+    let mut seed = kms.decrypt(&kn, encrypted_seed).await?;
 
     let result = evm::sign_evm_tx(&seed, chain_id, index, tx).await;
     seed.zeroize();
@@ -122,15 +180,15 @@ pub async fn sign_evm_transaction(
 /// # Errors
 /// Returns `SignerError` if decryption, key derivation, or signing fails.
 pub async fn sign_solana_transaction(
-    kms: &InfisicalKms,
+    kms: &KmsBackend,
     merchant_id: &str,
     encrypted_seed: &str,
     chain_id: u64,
     index: u32,
     tx: &mut solana_transaction::Transaction,
 ) -> Result<(), SignerError> {
-    let key_name = InfisicalKms::key_name(merchant_id);
-    let mut seed = kms.decrypt(&key_name, encrypted_seed).await?;
+    let kn = key_name(merchant_id);
+    let mut seed = kms.decrypt(&kn, encrypted_seed).await?;
 
     let result = solana::sign_solana_tx(&seed, chain_id, index, tx);
     seed.zeroize();

@@ -39,7 +39,7 @@ async fn main() {
     let state = AppState {
         db,
         config,
-        kms: Some(Arc::new(kms)),
+        kms: Some(Arc::new(kassi_signer::KmsBackend::Infisical(kms))),
     };
 
     axum::serve(listener, app(state))

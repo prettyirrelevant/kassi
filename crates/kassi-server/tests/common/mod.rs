@@ -1,30 +1,144 @@
 #![allow(dead_code, clippy::missing_panics_doc, clippy::must_use_candidate)]
 
+use std::sync::Arc;
+
 use alloy::hex;
 use alloy::primitives::{keccak256, Address};
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
+use kassi_db::diesel_async::AsyncConnection;
+use kassi_db::diesel_async::AsyncPgConnection;
+use kassi_db::diesel_async::SimpleAsyncConnection;
 use kassi_server::config::Config;
 use kassi_server::AppState;
 use tower::ServiceExt;
 
-pub async fn test_state() -> AppState {
-    AppState {
-        db: kassi_db::create_pool(
-            &std::env::var("DATABASE_URL").expect("DATABASE_URL must be set"),
-        )
+const MIGRATION_0_DIESEL_SETUP: &str =
+    include_str!("../../../kassi-db/migrations/00000000000000_diesel_initial_setup/up.sql");
+const MIGRATION_1_INITIAL_SCHEMA: &str =
+    include_str!("../../../kassi-db/migrations/2026-03-08-141825_initial_schema/up.sql");
+
+fn maintenance_url() -> String {
+    std::env::var("DATABASE_URL").expect("DATABASE_URL must be set")
+}
+
+fn test_config() -> Config {
+    Config {
+        database_url: String::new(),
+        session_jwt_secret: "test-secret-that-is-long-enough-for-hs256".into(),
+        api_key_prefix: "kassi:test:".into(),
+        infisical_client_id: String::new(),
+        infisical_client_secret: String::new(),
+        infisical_project_id: String::new(),
+        port: 3000,
+    }
+}
+
+/// Per-test isolated database and app state. Creates a unique database on
+/// construction, drops it when the struct goes out of scope.
+pub struct TestContext {
+    pub state: AppState,
+    db_name: String,
+    maintenance_url: String,
+}
+
+impl TestContext {
+    pub async fn new() -> Self {
+        Self::build(None).await
+    }
+
+    pub async fn with_kms() -> Self {
+        Self::build(Some(Arc::new(kassi_signer::KmsBackend::Mock(
+            kassi_signer::MockKms::new(),
+        ))))
         .await
-        .expect("failed to create test pool"),
-        config: Config {
-            database_url: String::new(),
-            session_jwt_secret: "test-secret-that-is-long-enough-for-hs256".into(),
-            api_key_prefix: "kassi:test:".into(),
-            infisical_client_id: String::new(),
-            infisical_client_secret: String::new(),
-            infisical_project_id: String::new(),
-            port: 3000,
-        },
-        kms: None,
+    }
+
+    async fn build(kms: Option<Arc<kassi_signer::KmsBackend>>) -> Self {
+        let base_url = maintenance_url();
+        let alphabet: Vec<char> = "abcdefghijklmnopqrstuvwxyz0123456789".chars().collect();
+        let db_name = format!("kassi_test_{}", nanoid::nanoid!(10, &alphabet));
+
+        // connect to maintenance db and create the test database
+        let mut conn = AsyncPgConnection::establish(&base_url)
+            .await
+            .expect("failed to connect to maintenance db");
+        conn.batch_execute(&format!("CREATE DATABASE \"{db_name}\""))
+            .await
+            .expect("failed to create test database");
+
+        // build url for the new database
+        let test_url = replace_db_name(&base_url, &db_name);
+
+        // connect to the new database and run migrations
+        let mut test_conn = AsyncPgConnection::establish(&test_url)
+            .await
+            .expect("failed to connect to test database");
+        test_conn
+            .batch_execute(MIGRATION_0_DIESEL_SETUP)
+            .await
+            .expect("failed to run diesel setup migration");
+        test_conn
+            .batch_execute(MIGRATION_1_INITIAL_SCHEMA)
+            .await
+            .expect("failed to run initial schema migration");
+
+        let pool = kassi_db::create_pool(&test_url)
+            .await
+            .expect("failed to create test pool");
+
+        Self {
+            state: AppState {
+                db: pool,
+                config: test_config(),
+                kms,
+            },
+            db_name,
+            maintenance_url: base_url,
+        }
+    }
+}
+
+impl Drop for TestContext {
+    fn drop(&mut self) {
+        let url = self.maintenance_url.clone();
+        let db_name = self.db_name.clone();
+
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("failed to build cleanup runtime");
+            rt.block_on(async {
+                if let Ok(mut conn) = AsyncPgConnection::establish(&url).await {
+                    let _ = conn
+                        .batch_execute(&format!(
+                            "SELECT pg_terminate_backend(pid) \
+                             FROM pg_stat_activity \
+                             WHERE datname = '{db_name}' AND pid <> pg_backend_pid()"
+                        ))
+                        .await;
+                    let _ = conn
+                        .batch_execute(&format!("DROP DATABASE IF EXISTS \"{db_name}\""))
+                        .await;
+                }
+            });
+        })
+        .join()
+        .ok();
+    }
+}
+
+/// Replace the database name in a postgres URL.
+fn replace_db_name(url: &str, new_db: &str) -> String {
+    let query_start = url.find('?').unwrap_or(url.len());
+    let base = &url[..query_start];
+    let query = &url[query_start..];
+
+    if let Some(last_slash) = base.rfind('/') {
+        format!("{}/{new_db}{query}", &base[..last_slash])
+    } else {
+        format!("{url}/{new_db}")
     }
 }
 

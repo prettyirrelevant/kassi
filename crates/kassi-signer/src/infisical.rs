@@ -6,7 +6,7 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use crate::SignerError;
+use crate::{Kms, SignerError};
 
 /// Buffer before actual expiry to avoid using a token that's about to die.
 const EXPIRY_BUFFER: Duration = Duration::from_secs(30);
@@ -135,90 +135,7 @@ impl InfisicalKms {
         })
     }
 
-    #[must_use]
-    pub fn key_name(merchant_id: &str) -> String {
-        format!("kassi-merchant-{merchant_id}")
-    }
-
-    /// Create a new AES-256-GCM encryption key in Infisical KMS.
-    ///
-    /// # Errors
-    /// Returns `SignerError::Kms` if the API call fails.
-    pub async fn create_key(&self, name: &str) -> Result<(), SignerError> {
-        let token = self.valid_token().await?;
-
-        let resp = self
-            .client
-            .post(format!("{BASE_URL}/api/v1/kms/keys"))
-            .bearer_auth(token.expose_secret())
-            .json(&CreateKeyRequest {
-                project_id: &self.project_id,
-                name,
-                encryption_algorithm: "aes-256-gcm",
-            })
-            .send()
-            .await
-            .map_err(KmsError::from)?;
-
-        check_response(resp, "create key").await?;
-        Ok(())
-    }
-
-    /// Encrypt plaintext bytes using the named KMS key.
-    ///
-    /// # Errors
-    /// Returns `SignerError::Kms` if the API call fails.
-    pub async fn encrypt(&self, name: &str, plaintext: &[u8]) -> Result<String, SignerError> {
-        let key_id = self.get_key_id(name).await?;
-        let token = self.valid_token().await?;
-        let b64 = BASE64.encode(plaintext);
-
-        let resp = self
-            .client
-            .post(format!("{BASE_URL}/api/v1/kms/keys/{key_id}/encrypt"))
-            .bearer_auth(token.expose_secret())
-            .json(&EncryptRequest { plaintext: &b64 })
-            .send()
-            .await
-            .map_err(KmsError::from)?;
-
-        let resp = check_response(resp, "encrypt").await?;
-        Ok(resp
-            .json::<EncryptResponse>()
-            .await
-            .map_err(KmsError::from)?
-            .ciphertext)
-    }
-
-    /// Decrypt ciphertext using the named KMS key, returning raw bytes.
-    ///
-    /// # Errors
-    /// Returns `SignerError::Kms` if the API call fails,
-    /// or `SignerError::Base64` if the decrypted payload is not valid base64.
-    pub async fn decrypt(&self, name: &str, ciphertext: &str) -> Result<Vec<u8>, SignerError> {
-        let key_id = self.get_key_id(name).await?;
-        let token = self.valid_token().await?;
-
-        let resp = self
-            .client
-            .post(format!("{BASE_URL}/api/v1/kms/keys/{key_id}/decrypt"))
-            .bearer_auth(token.expose_secret())
-            .json(&DecryptRequest { ciphertext })
-            .send()
-            .await
-            .map_err(KmsError::from)?;
-
-        let resp = check_response(resp, "decrypt").await?;
-        let plaintext_b64 = resp
-            .json::<DecryptResponse>()
-            .await
-            .map_err(KmsError::from)?
-            .plaintext;
-
-        Ok(BASE64.decode(&plaintext_b64)?)
-    }
-
-    async fn get_key_id(&self, name: &str) -> Result<String, SignerError> {
+    async fn get_key_id(&self, name: &str) -> Result<String, KmsError> {
         let token = self.valid_token().await?;
 
         let resp = self
@@ -240,7 +157,7 @@ impl InfisicalKms {
     }
 
     /// Return a valid access token, refreshing if expired or about to expire.
-    async fn valid_token(&self) -> Result<SecretString, SignerError> {
+    async fn valid_token(&self) -> Result<SecretString, KmsError> {
         {
             let state = self.token.read().await;
             if Instant::now() < state.expires_at {
@@ -263,6 +180,76 @@ impl InfisicalKms {
         .await?;
 
         Ok(state.access_token.clone())
+    }
+}
+
+impl Kms for InfisicalKms {
+    async fn create_key(&self, name: &str) -> Result<(), KmsError> {
+        let token = self.valid_token().await?;
+
+        let resp = self
+            .client
+            .post(format!("{BASE_URL}/api/v1/kms/keys"))
+            .bearer_auth(token.expose_secret())
+            .json(&CreateKeyRequest {
+                project_id: &self.project_id,
+                name,
+                encryption_algorithm: "aes-256-gcm",
+            })
+            .send()
+            .await
+            .map_err(KmsError::from)?;
+
+        check_response(resp, "create key").await?;
+        Ok(())
+    }
+
+    async fn encrypt(&self, name: &str, plaintext: &[u8]) -> Result<String, KmsError> {
+        let key_id = self.get_key_id(name).await?;
+        let token = self.valid_token().await?;
+        let b64 = BASE64.encode(plaintext);
+
+        let resp = self
+            .client
+            .post(format!("{BASE_URL}/api/v1/kms/keys/{key_id}/encrypt"))
+            .bearer_auth(token.expose_secret())
+            .json(&EncryptRequest { plaintext: &b64 })
+            .send()
+            .await
+            .map_err(KmsError::from)?;
+
+        let resp = check_response(resp, "encrypt").await?;
+        Ok(resp
+            .json::<EncryptResponse>()
+            .await
+            .map_err(KmsError::from)?
+            .ciphertext)
+    }
+
+    async fn decrypt(&self, name: &str, ciphertext: &str) -> Result<Vec<u8>, KmsError> {
+        let key_id = self.get_key_id(name).await?;
+        let token = self.valid_token().await?;
+
+        let resp = self
+            .client
+            .post(format!("{BASE_URL}/api/v1/kms/keys/{key_id}/decrypt"))
+            .bearer_auth(token.expose_secret())
+            .json(&DecryptRequest { ciphertext })
+            .send()
+            .await
+            .map_err(KmsError::from)?;
+
+        let resp = check_response(resp, "decrypt").await?;
+        let plaintext_b64 = resp
+            .json::<DecryptResponse>()
+            .await
+            .map_err(KmsError::from)?
+            .plaintext;
+
+        BASE64.decode(&plaintext_b64).map_err(|e| KmsError::Api {
+            operation: "decrypt (base64 decode)",
+            body: e.to_string(),
+        })
     }
 }
 

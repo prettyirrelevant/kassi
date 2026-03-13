@@ -31,6 +31,8 @@ alloy = { version = "1", features = ["k256"] }
 http-body-util = "0.1"
 hyper = "1"
 k256 = { version = "0.13", features = ["ecdsa"] }
+kassi-signer = { path = "../kassi-signer", features = ["test-utils"] }
+nanoid = { workspace = true }
 rand_core = { version = "0.6", features = ["getrandom"] }
 tower = { version = "0.5", features = ["util"] }
 

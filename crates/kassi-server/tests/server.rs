@@ -4,14 +4,15 @@ use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 
-use common::test_state;
+use common::TestContext;
 
 mod health {
     use super::*;
 
     #[tokio::test]
     async fn returns_200_with_healthy_status() {
-        let response = kassi_server::app(test_state().await)
+        let ctx = TestContext::new().await;
+        let response = kassi_server::app(ctx.state.clone())
             .oneshot(
                 Request::get("/health")
                     .body(axum::body::Body::empty())
@@ -34,7 +35,8 @@ mod fallback {
 
     #[tokio::test]
     async fn unknown_route_returns_404() {
-        let response = kassi_server::app(test_state().await)
+        let ctx = TestContext::new().await;
+        let response = kassi_server::app(ctx.state.clone())
             .oneshot(
                 Request::get("/nonexistent")
                     .body(axum::body::Body::empty())
@@ -57,7 +59,8 @@ mod cors {
 
     #[tokio::test]
     async fn preflight_returns_cors_headers() {
-        let response = kassi_server::app(test_state().await)
+        let ctx = TestContext::new().await;
+        let response = kassi_server::app(ctx.state.clone())
             .oneshot(
                 Request::options("/health")
                     .header("origin", "https://example.com")

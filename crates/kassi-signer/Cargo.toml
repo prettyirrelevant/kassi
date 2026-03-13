@@ -3,6 +3,9 @@ name = "kassi-signer"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+test-utils = []
+
 [dependencies]
 alloy = { version = "=1.0.41", features = [
     "consensus",

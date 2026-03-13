@@ -9,7 +9,7 @@ use kassi_server::routes::auth::Claims;
 use kassi_server::AppState;
 use tower::ServiceExt;
 
-use common::{authenticate, test_state};
+use common::{authenticate, TestContext};
 
 async fn request(
     state: &AppState,
@@ -105,20 +105,21 @@ mod session_auth {
 
     #[tokio::test]
     async fn valid_jwt_resolves_merchant() {
-        let state = test_state().await;
-        let (token, _) = authenticate(&state).await;
+        let ctx = TestContext::new().await;
+        let (token, _) = authenticate(&ctx.state).await;
 
-        let (status, _) = request(&state, "POST", "/merchants/me/rotate-key", &token, None).await;
+        let (status, _) =
+            request(&ctx.state, "POST", "/merchants/me/rotate-key", &token, None).await;
         assert_eq!(status, StatusCode::OK);
     }
 
     #[tokio::test]
     async fn valid_jwt_for_unknown_merchant_auto_creates() {
-        let state = test_state().await;
-        let token = make_jwt(&state, "mer_nonexistent_test_12345", false);
+        let ctx = TestContext::new().await;
+        let token = make_jwt(&ctx.state, "mer_nonexistent_test_12345", false);
 
         let (status, json) =
-            request(&state, "POST", "/merchants/me/rotate-key", &token, None).await;
+            request(&ctx.state, "POST", "/merchants/me/rotate-key", &token, None).await;
         assert_eq!(status, StatusCode::OK);
         assert!(json["data"]["api_key"]
             .as_str()
@@ -128,20 +129,20 @@ mod session_auth {
 
     #[tokio::test]
     async fn expired_jwt_returns_401() {
-        let state = test_state().await;
-        let token = make_jwt(&state, "mer_whatever", true);
+        let ctx = TestContext::new().await;
+        let token = make_jwt(&ctx.state, "mer_whatever", true);
 
         let (status, json) =
-            request(&state, "POST", "/merchants/me/rotate-key", &token, None).await;
+            request(&ctx.state, "POST", "/merchants/me/rotate-key", &token, None).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         assert_eq!(json["error"]["code"], "authentication_required");
     }
 
     #[tokio::test]
     async fn missing_auth_header_returns_401() {
-        let state = test_state().await;
+        let ctx = TestContext::new().await;
 
-        let resp = kassi_server::app(state.clone())
+        let resp = kassi_server::app(ctx.state.clone())
             .oneshot(
                 Request::post("/merchants/me/rotate-key")
                     .body(axum::body::Body::empty())
@@ -161,23 +162,23 @@ mod api_key_auth {
 
     #[tokio::test]
     async fn valid_api_key_resolves_merchant() {
-        let state = test_state().await;
-        let (token, merchant_id) = authenticate(&state).await;
+        let ctx = TestContext::new().await;
+        let (token, merchant_id) = authenticate(&ctx.state).await;
 
-        let (_, json) = request(&state, "POST", "/merchants/me/rotate-key", &token, None).await;
+        let (_, json) = request(&ctx.state, "POST", "/merchants/me/rotate-key", &token, None).await;
         let api_key = json["data"]["api_key"].as_str().unwrap().to_string();
 
         let mut parts = api_key_parts(&api_key);
-        let result = ApiKeyAuth::from_request_parts(&mut parts, &state).await;
+        let result = ApiKeyAuth::from_request_parts(&mut parts, &ctx.state).await;
         assert_eq!(result.unwrap().merchant_id, merchant_id);
     }
 
     #[tokio::test]
     async fn invalid_api_key_returns_401() {
-        let state = test_state().await;
+        let ctx = TestContext::new().await;
 
         let mut parts = api_key_parts("kassi:test:bogus_key_here");
-        let result = ApiKeyAuth::from_request_parts(&mut parts, &state).await;
+        let result = ApiKeyAuth::from_request_parts(&mut parts, &ctx.state).await;
         assert!(result.is_err());
     }
 }
@@ -189,11 +190,11 @@ mod rotate_key {
 
     #[tokio::test]
     async fn returns_key_with_correct_prefix() {
-        let state = test_state().await;
-        let (token, _) = authenticate(&state).await;
+        let ctx = TestContext::new().await;
+        let (token, _) = authenticate(&ctx.state).await;
 
         let (status, json) =
-            request(&state, "POST", "/merchants/me/rotate-key", &token, None).await;
+            request(&ctx.state, "POST", "/merchants/me/rotate-key", &token, None).await;
         assert_eq!(status, StatusCode::OK);
 
         let api_key = json["data"]["api_key"].as_str().unwrap();
@@ -202,26 +203,28 @@ mod rotate_key {
 
     #[tokio::test]
     async fn old_key_stops_working_after_rotation() {
-        let state = test_state().await;
-        let (token, _) = authenticate(&state).await;
+        let ctx = TestContext::new().await;
+        let (token, _) = authenticate(&ctx.state).await;
 
-        let (_, json1) = request(&state, "POST", "/merchants/me/rotate-key", &token, None).await;
+        let (_, json1) =
+            request(&ctx.state, "POST", "/merchants/me/rotate-key", &token, None).await;
         let old_key = json1["data"]["api_key"].as_str().unwrap().to_string();
 
-        let (_, json2) = request(&state, "POST", "/merchants/me/rotate-key", &token, None).await;
+        let (_, json2) =
+            request(&ctx.state, "POST", "/merchants/me/rotate-key", &token, None).await;
         let new_key = json2["data"]["api_key"].as_str().unwrap().to_string();
 
         assert_ne!(old_key, new_key);
 
         // old key no longer resolves
         let mut parts = api_key_parts(&old_key);
-        assert!(ApiKeyAuth::from_request_parts(&mut parts, &state)
+        assert!(ApiKeyAuth::from_request_parts(&mut parts, &ctx.state)
             .await
             .is_err());
 
         // new key resolves
         let mut parts = api_key_parts(&new_key);
-        assert!(ApiKeyAuth::from_request_parts(&mut parts, &state)
+        assert!(ApiKeyAuth::from_request_parts(&mut parts, &ctx.state)
             .await
             .is_ok());
     }
@@ -232,10 +235,10 @@ mod get_merchant {
 
     #[tokio::test]
     async fn returns_merchant_data_with_session_auth() {
-        let state = test_state().await;
-        let (token, merchant_id) = authenticate(&state).await;
+        let ctx = TestContext::new().await;
+        let (token, merchant_id) = authenticate(&ctx.state).await;
 
-        let (status, json) = request(&state, "GET", "/merchants/me", &token, None).await;
+        let (status, json) = request(&ctx.state, "GET", "/merchants/me", &token, None).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(json["data"]["id"].as_str().unwrap(), merchant_id);
         assert!(json["data"]["created_at"].is_string());
@@ -244,22 +247,23 @@ mod get_merchant {
 
     #[tokio::test]
     async fn returns_merchant_data_with_api_key() {
-        let state = test_state().await;
-        let (token, merchant_id) = authenticate(&state).await;
+        let ctx = TestContext::new().await;
+        let (token, merchant_id) = authenticate(&ctx.state).await;
 
-        let (_, json) = request(&state, "POST", "/merchants/me/rotate-key", &token, None).await;
+        let (_, json) = request(&ctx.state, "POST", "/merchants/me/rotate-key", &token, None).await;
         let api_key = json["data"]["api_key"].as_str().unwrap();
 
-        let (status, json) = request_with_api_key(&state, "GET", "/merchants/me", api_key).await;
+        let (status, json) =
+            request_with_api_key(&ctx.state, "GET", "/merchants/me", api_key).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(json["data"]["id"].as_str().unwrap(), merchant_id);
     }
 
     #[tokio::test]
     async fn unauthenticated_returns_401() {
-        let state = test_state().await;
+        let ctx = TestContext::new().await;
 
-        let resp = kassi_server::app(state.clone())
+        let resp = kassi_server::app(ctx.state.clone())
             .oneshot(
                 Request::get("/merchants/me")
                     .body(axum::body::Body::empty())
@@ -277,11 +281,11 @@ mod update_merchant {
 
     #[tokio::test]
     async fn updates_name() {
-        let state = test_state().await;
-        let (token, merchant_id) = authenticate(&state).await;
+        let ctx = TestContext::new().await;
+        let (token, merchant_id) = authenticate(&ctx.state).await;
 
         let (status, json) = request(
-            &state,
+            &ctx.state,
             "PATCH",
             "/merchants/me",
             &token,
@@ -295,11 +299,11 @@ mod update_merchant {
 
     #[tokio::test]
     async fn updates_webhook_url() {
-        let state = test_state().await;
-        let (token, _) = authenticate(&state).await;
+        let ctx = TestContext::new().await;
+        let (token, _) = authenticate(&ctx.state).await;
 
         let (status, json) = request(
-            &state,
+            &ctx.state,
             "PATCH",
             "/merchants/me",
             &token,
@@ -315,11 +319,11 @@ mod update_merchant {
 
     #[tokio::test]
     async fn updates_both_name_and_webhook_url() {
-        let state = test_state().await;
-        let (token, _) = authenticate(&state).await;
+        let ctx = TestContext::new().await;
+        let (token, _) = authenticate(&ctx.state).await;
 
         let (status, json) = request(
-            &state,
+            &ctx.state,
             "PATCH",
             "/merchants/me",
             &token,
@@ -336,11 +340,11 @@ mod update_merchant {
 
     #[tokio::test]
     async fn get_reflects_updated_name() {
-        let state = test_state().await;
-        let (token, _) = authenticate(&state).await;
+        let ctx = TestContext::new().await;
+        let (token, _) = authenticate(&ctx.state).await;
 
         request(
-            &state,
+            &ctx.state,
             "PATCH",
             "/merchants/me",
             &token,
@@ -348,16 +352,16 @@ mod update_merchant {
         )
         .await;
 
-        let (status, json) = request(&state, "GET", "/merchants/me", &token, None).await;
+        let (status, json) = request(&ctx.state, "GET", "/merchants/me", &token, None).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(json["data"]["name"].as_str().unwrap(), "persistent name");
     }
 
     #[tokio::test]
     async fn unauthenticated_returns_401() {
-        let state = test_state().await;
+        let ctx = TestContext::new().await;
 
-        let resp = kassi_server::app(state.clone())
+        let resp = kassi_server::app(ctx.state.clone())
             .oneshot(
                 Request::builder()
                     .method("PATCH")
@@ -380,11 +384,11 @@ mod rotate_webhook_secret {
 
     #[tokio::test]
     async fn returns_new_secret() {
-        let state = test_state().await;
-        let (token, _) = authenticate(&state).await;
+        let ctx = TestContext::new().await;
+        let (token, _) = authenticate(&ctx.state).await;
 
         let (status, json) = request(
-            &state,
+            &ctx.state,
             "POST",
             "/merchants/me/rotate-webhook-secret",
             &token,
@@ -398,11 +402,11 @@ mod rotate_webhook_secret {
 
     #[tokio::test]
     async fn returns_different_secret_each_time() {
-        let state = test_state().await;
-        let (token, _) = authenticate(&state).await;
+        let ctx = TestContext::new().await;
+        let (token, _) = authenticate(&ctx.state).await;
 
         let (_, json1) = request(
-            &state,
+            &ctx.state,
             "POST",
             "/merchants/me/rotate-webhook-secret",
             &token,
@@ -410,7 +414,7 @@ mod rotate_webhook_secret {
         )
         .await;
         let (_, json2) = request(
-            &state,
+            &ctx.state,
             "POST",
             "/merchants/me/rotate-webhook-secret",
             &token,
@@ -426,9 +430,9 @@ mod rotate_webhook_secret {
 
     #[tokio::test]
     async fn unauthenticated_returns_401() {
-        let state = test_state().await;
+        let ctx = TestContext::new().await;
 
-        let resp = kassi_server::app(state.clone())
+        let resp = kassi_server::app(ctx.state.clone())
             .oneshot(
                 Request::post("/merchants/me/rotate-webhook-secret")
                     .body(axum::body::Body::empty())

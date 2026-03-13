@@ -8,7 +8,7 @@ use kassi_db::schema;
 use kassi_server::AppState;
 use tower::ServiceExt;
 
-use common::{authenticate_with_key, eip191_sign, test_state};
+use common::{authenticate_with_key, eip191_sign, TestContext};
 
 async fn request(
     state: &AppState,
@@ -81,10 +81,10 @@ mod create {
 
     #[tokio::test]
     async fn creates_settlement_destination() {
-        let state = test_state().await;
-        let (token, _, key) = authenticate_with_key(&state).await;
+        let ctx = TestContext::new().await;
+        let (token, _, key) = authenticate_with_key(&ctx.state).await;
 
-        seed_network(&state, "eip155:1", "Ethereum").await;
+        seed_network(&ctx.state, "eip155:1", "Ethereum").await;
 
         let sig = sign_create_message(
             &key,
@@ -93,7 +93,7 @@ mod create {
         );
 
         let (status, json) = request(
-            &state,
+            &ctx.state,
             "POST",
             "/settlement-destinations",
             &token,
@@ -115,11 +115,11 @@ mod create {
 
     #[tokio::test]
     async fn creates_multiple_destinations_same_namespace() {
-        let state = test_state().await;
-        let (token, _, key) = authenticate_with_key(&state).await;
+        let ctx = TestContext::new().await;
+        let (token, _, key) = authenticate_with_key(&ctx.state).await;
 
-        seed_network(&state, "eip155:1", "Ethereum").await;
-        seed_network(&state, "eip155:8453", "Base").await;
+        seed_network(&ctx.state, "eip155:1", "Ethereum").await;
+        seed_network(&ctx.state, "eip155:8453", "Base").await;
 
         let sig = sign_create_message(
             &key,
@@ -128,7 +128,7 @@ mod create {
         );
 
         let (status, json) = request(
-            &state,
+            &ctx.state,
             "POST",
             "/settlement-destinations",
             &token,
@@ -146,11 +146,16 @@ mod create {
 
     #[tokio::test]
     async fn rejects_mixed_namespaces() {
-        let state = test_state().await;
-        let (token, _, key) = authenticate_with_key(&state).await;
+        let ctx = TestContext::new().await;
+        let (token, _, key) = authenticate_with_key(&ctx.state).await;
 
-        seed_network(&state, "eip155:1", "Ethereum").await;
-        seed_network(&state, "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", "Solana").await;
+        seed_network(&ctx.state, "eip155:1", "Ethereum").await;
+        seed_network(
+            &ctx.state,
+            "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            "Solana",
+        )
+        .await;
 
         let sig = sign_create_message(
             &key,
@@ -159,7 +164,7 @@ mod create {
         );
 
         let (status, json) = request(
-            &state,
+            &ctx.state,
             "POST",
             "/settlement-destinations",
             &token,
@@ -177,11 +182,11 @@ mod create {
 
     #[tokio::test]
     async fn rejects_empty_network_ids() {
-        let state = test_state().await;
-        let (token, _, _) = authenticate_with_key(&state).await;
+        let ctx = TestContext::new().await;
+        let (token, _, _) = authenticate_with_key(&ctx.state).await;
 
         let (status, json) = request(
-            &state,
+            &ctx.state,
             "POST",
             "/settlement-destinations",
             &token,
@@ -199,13 +204,13 @@ mod create {
 
     #[tokio::test]
     async fn rejects_invalid_signature() {
-        let state = test_state().await;
-        let (token, _, _) = authenticate_with_key(&state).await;
+        let ctx = TestContext::new().await;
+        let (token, _, _) = authenticate_with_key(&ctx.state).await;
 
-        seed_network(&state, "eip155:1", "Ethereum").await;
+        seed_network(&ctx.state, "eip155:1", "Ethereum").await;
 
         let (status, json) = request(
-            &state,
+            &ctx.state,
             "POST",
             "/settlement-destinations",
             &token,
@@ -223,13 +228,13 @@ mod create {
 
     #[tokio::test]
     async fn rejects_nonexistent_network() {
-        let state = test_state().await;
-        let (token, _, key) = authenticate_with_key(&state).await;
+        let ctx = TestContext::new().await;
+        let (token, _, key) = authenticate_with_key(&ctx.state).await;
 
         let sig = sign_create_message(&key, "0xdeadbeef", &["eip155:999999"]);
 
         let (status, json) = request(
-            &state,
+            &ctx.state,
             "POST",
             "/settlement-destinations",
             &token,
@@ -247,16 +252,16 @@ mod create {
 
     #[tokio::test]
     async fn upserts_existing_destination() {
-        let state = test_state().await;
-        let (token, _, key) = authenticate_with_key(&state).await;
+        let ctx = TestContext::new().await;
+        let (token, _, key) = authenticate_with_key(&ctx.state).await;
 
-        seed_network(&state, "eip155:1", "Ethereum").await;
+        seed_network(&ctx.state, "eip155:1", "Ethereum").await;
 
         let addr1 = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         let sig1 = sign_create_message(&key, addr1, &["eip155:1"]);
 
         let (status, _) = request(
-            &state,
+            &ctx.state,
             "POST",
             "/settlement-destinations",
             &token,
@@ -273,7 +278,7 @@ mod create {
         let sig2 = sign_create_message(&key, addr2, &["eip155:1"]);
 
         let (status, json) = request(
-            &state,
+            &ctx.state,
             "POST",
             "/settlement-destinations",
             &token,
@@ -288,7 +293,8 @@ mod create {
         assert_eq!(json["data"][0]["address"], addr2);
 
         // list should show only one destination for this network
-        let (status, json) = request(&state, "GET", "/settlement-destinations", &token, None).await;
+        let (status, json) =
+            request(&ctx.state, "GET", "/settlement-destinations", &token, None).await;
         assert_eq!(status, StatusCode::OK);
 
         let destinations: Vec<&serde_json::Value> = json["data"]
@@ -303,9 +309,9 @@ mod create {
 
     #[tokio::test]
     async fn unauthenticated_returns_401() {
-        let state = test_state().await;
+        let ctx = TestContext::new().await;
 
-        let resp = kassi_server::app(state.clone())
+        let resp = kassi_server::app(ctx.state.clone())
             .oneshot(
                 Request::post("/settlement-destinations")
                     .header("content-type", "application/json")
@@ -331,20 +337,21 @@ mod list {
 
     #[tokio::test]
     async fn returns_empty_list_initially() {
-        let state = test_state().await;
-        let (token, _, _) = authenticate_with_key(&state).await;
+        let ctx = TestContext::new().await;
+        let (token, _, _) = authenticate_with_key(&ctx.state).await;
 
-        let (status, json) = request(&state, "GET", "/settlement-destinations", &token, None).await;
+        let (status, json) =
+            request(&ctx.state, "GET", "/settlement-destinations", &token, None).await;
         assert_eq!(status, StatusCode::OK);
         assert!(json["data"].as_array().unwrap().is_empty());
     }
 
     #[tokio::test]
     async fn returns_created_destinations() {
-        let state = test_state().await;
-        let (token, _, key) = authenticate_with_key(&state).await;
+        let ctx = TestContext::new().await;
+        let (token, _, key) = authenticate_with_key(&ctx.state).await;
 
-        seed_network(&state, "eip155:1", "Ethereum").await;
+        seed_network(&ctx.state, "eip155:1", "Ethereum").await;
 
         let sig = sign_create_message(
             &key,
@@ -353,7 +360,7 @@ mod list {
         );
 
         request(
-            &state,
+            &ctx.state,
             "POST",
             "/settlement-destinations",
             &token,
@@ -365,16 +372,17 @@ mod list {
         )
         .await;
 
-        let (status, json) = request(&state, "GET", "/settlement-destinations", &token, None).await;
+        let (status, json) =
+            request(&ctx.state, "GET", "/settlement-destinations", &token, None).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(json["data"].as_array().unwrap().len(), 1);
     }
 
     #[tokio::test]
     async fn unauthenticated_returns_401() {
-        let state = test_state().await;
+        let ctx = TestContext::new().await;
 
-        let resp = kassi_server::app(state.clone())
+        let resp = kassi_server::app(ctx.state.clone())
             .oneshot(
                 Request::get("/settlement-destinations")
                     .body(axum::body::Body::empty())
@@ -392,10 +400,10 @@ mod delete {
 
     #[tokio::test]
     async fn deletes_settlement_destination() {
-        let state = test_state().await;
-        let (token, _, key) = authenticate_with_key(&state).await;
+        let ctx = TestContext::new().await;
+        let (token, _, key) = authenticate_with_key(&ctx.state).await;
 
-        seed_network(&state, "eip155:1", "Ethereum").await;
+        seed_network(&ctx.state, "eip155:1", "Ethereum").await;
 
         let sig = sign_create_message(
             &key,
@@ -404,7 +412,7 @@ mod delete {
         );
 
         let (_, json) = request(
-            &state,
+            &ctx.state,
             "POST",
             "/settlement-destinations",
             &token,
@@ -420,7 +428,7 @@ mod delete {
         let delete_sig = sign_delete_message(&key, dest_id);
 
         let (status, _) = request(
-            &state,
+            &ctx.state,
             "DELETE",
             &format!("/settlement-destinations/{dest_id}"),
             &token,
@@ -430,16 +438,16 @@ mod delete {
         assert_eq!(status, StatusCode::NO_CONTENT);
 
         // verify it's gone
-        let (_, json) = request(&state, "GET", "/settlement-destinations", &token, None).await;
+        let (_, json) = request(&ctx.state, "GET", "/settlement-destinations", &token, None).await;
         assert!(json["data"].as_array().unwrap().is_empty());
     }
 
     #[tokio::test]
     async fn rejects_invalid_signature() {
-        let state = test_state().await;
-        let (token, _, key) = authenticate_with_key(&state).await;
+        let ctx = TestContext::new().await;
+        let (token, _, key) = authenticate_with_key(&ctx.state).await;
 
-        seed_network(&state, "eip155:1", "Ethereum").await;
+        seed_network(&ctx.state, "eip155:1", "Ethereum").await;
 
         let sig = sign_create_message(
             &key,
@@ -448,7 +456,7 @@ mod delete {
         );
 
         let (_, json) = request(
-            &state,
+            &ctx.state,
             "POST",
             "/settlement-destinations",
             &token,
@@ -463,7 +471,7 @@ mod delete {
         let dest_id = json["data"][0]["id"].as_str().unwrap();
 
         let (status, json) = request(
-            &state,
+            &ctx.state,
             "DELETE",
             &format!("/settlement-destinations/{dest_id}"),
             &token,
@@ -478,13 +486,13 @@ mod delete {
 
     #[tokio::test]
     async fn returns_404_for_nonexistent() {
-        let state = test_state().await;
-        let (token, _, key) = authenticate_with_key(&state).await;
+        let ctx = TestContext::new().await;
+        let (token, _, key) = authenticate_with_key(&ctx.state).await;
 
         let delete_sig = sign_delete_message(&key, "sdst_nonexistent");
 
         let (status, json) = request(
-            &state,
+            &ctx.state,
             "DELETE",
             "/settlement-destinations/sdst_nonexistent",
             &token,
@@ -497,9 +505,9 @@ mod delete {
 
     #[tokio::test]
     async fn unauthenticated_returns_401() {
-        let state = test_state().await;
+        let ctx = TestContext::new().await;
 
-        let resp = kassi_server::app(state.clone())
+        let resp = kassi_server::app(ctx.state.clone())
             .oneshot(
                 Request::delete("/settlement-destinations/sdst_123")
                     .header("content-type", "application/json")
