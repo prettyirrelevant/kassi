@@ -37,6 +37,7 @@ fn test_config() -> Config {
         infisical_project_id: String::new(),
         port: 3000,
         quote_lock_duration_secs: 1800,
+        price_cache_stale_secs: 300,
     }
 }
 
@@ -75,6 +76,7 @@ impl PriceFetcher for FakePriceFetcher {
                         .map(|&usd_price| TokenPrice {
                             coingecko_id: id.clone(),
                             usd_price,
+                            source: "fake".to_string(),
                         })
                         .ok_or_else(|| PricingError::NotFound(id.clone()))
                 })
@@ -240,6 +242,63 @@ pub fn siws_message(address: &str, nonce: &str) -> String {
          Nonce: {nonce}\n\
          Issued At: 2026-01-01T00:00:00Z"
     )
+}
+
+/// Send an authenticated request and return `(status, json)`.
+///
+/// Supports any HTTP method. If `body` is `Some`, it is serialised as JSON.
+pub async fn request(
+    state: &AppState,
+    method: &str,
+    path: &str,
+    token: &str,
+    body: Option<serde_json::Value>,
+) -> (StatusCode, serde_json::Value) {
+    let builder = match method {
+        "GET" => Request::get(path),
+        "POST" => Request::post(path),
+        "PATCH" => Request::patch(path),
+        "PUT" => Request::put(path),
+        "DELETE" => Request::delete(path),
+        _ => panic!("unsupported HTTP method: {method}"),
+    };
+
+    let builder = builder.header("authorization", format!("Bearer {token}"));
+
+    let req = if let Some(json) = body {
+        builder
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(serde_json::to_vec(&json).unwrap()))
+            .unwrap()
+    } else {
+        builder.body(axum::body::Body::empty()).unwrap()
+    };
+
+    let resp = kassi_server::app(state.clone()).oneshot(req).await.unwrap();
+    let status = resp.status();
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    (status, serde_json::from_slice(&bytes).unwrap_or_default())
+}
+
+/// Seed an active network row for tests.
+pub async fn seed_network(state: &AppState, network_id: &str, display_name: &str) {
+    use kassi_db::diesel::prelude::*;
+    use kassi_db::diesel_async::RunQueryDsl;
+
+    let mut conn = state.db.get().await.unwrap();
+    kassi_db::diesel::insert_into(kassi_db::schema::networks::table)
+        .values((
+            kassi_db::schema::networks::id.eq(network_id),
+            kassi_db::schema::networks::display_name.eq(display_name),
+            kassi_db::schema::networks::block_time_ms.eq(12_000),
+            kassi_db::schema::networks::confirmations.eq(12),
+            kassi_db::schema::networks::is_active.eq(true),
+        ))
+        .on_conflict(kassi_db::schema::networks::id)
+        .do_nothing()
+        .execute(&mut conn)
+        .await
+        .unwrap();
 }
 
 /// Signs in with a fresh EVM wallet and returns `(token, merchant_id)`.

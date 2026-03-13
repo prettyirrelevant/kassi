@@ -8,6 +8,10 @@ fn default_quote_lock_duration_secs() -> i64 {
     1800 // 30 minutes
 }
 
+fn default_price_cache_stale_secs() -> i64 {
+    300 // 5 minutes
+}
+
 #[derive(Clone, Deserialize)]
 pub struct Config {
     pub database_url: String,
@@ -20,6 +24,8 @@ pub struct Config {
     pub port: u16,
     #[serde(default = "default_quote_lock_duration_secs")]
     pub quote_lock_duration_secs: i64,
+    #[serde(default = "default_price_cache_stale_secs")]
+    pub price_cache_stale_secs: i64,
 }
 
 impl Config {

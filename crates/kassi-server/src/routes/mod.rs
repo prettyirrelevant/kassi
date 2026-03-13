@@ -1,11 +1,14 @@
+mod assets;
 pub mod auth;
 mod deposit_addresses;
 mod health;
 mod merchants;
 mod payment_intents;
+mod prices;
 mod refunds;
 mod settlement_destinations;
 mod shared;
+mod webhooks;
 
 use axum::Router;
 
@@ -20,4 +23,7 @@ pub fn routes() -> Router<AppState> {
         .merge(deposit_addresses::routes())
         .merge(payment_intents::routes())
         .merge(refunds::routes())
+        .merge(assets::routes())
+        .merge(prices::routes())
+        .merge(webhooks::routes())
 }

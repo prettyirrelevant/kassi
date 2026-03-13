@@ -18,6 +18,7 @@ pub enum PricingError {
 pub struct TokenPrice {
     pub coingecko_id: String,
     pub usd_price: f64,
+    pub source: String,
 }
 
 /// A source that can fetch token prices by coingecko ID.
@@ -73,6 +74,7 @@ impl PriceSource for DefiLlama {
                 Ok(TokenPrice {
                     coingecko_id: (*id).to_string(),
                     usd_price: coin.price,
+                    source: "defillama".to_string(),
                 })
             })
             .collect()
@@ -120,6 +122,7 @@ impl PriceSource for CoinGecko {
                 Ok(TokenPrice {
                     coingecko_id: (*id).to_string(),
                     usd_price: entry.usd,
+                    source: "coingecko".to_string(),
                 })
             })
             .collect()
@@ -260,6 +263,7 @@ mod tests {
         TokenPrice {
             coingecko_id: "ethereum".to_string(),
             usd_price: usd,
+            source: "defillama".to_string(),
         }
     }
 
@@ -267,6 +271,7 @@ mod tests {
         TokenPrice {
             coingecko_id: "usd-coin".to_string(),
             usd_price: usd,
+            source: "defillama".to_string(),
         }
     }
 

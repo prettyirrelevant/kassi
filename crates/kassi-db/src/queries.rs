@@ -5,7 +5,7 @@ use diesel_async::RunQueryDsl;
 use crate::models::{
     Asset, DepositAddress, Job, LedgerEntry, MerchantConfig, Network, NetworkAddress,
     NewDepositAddress, NewJob, NewLedgerEntry, NewMerchant, NewMerchantConfig, NewNetworkAddress,
-    NewPaymentIntent, NewQuote, NewSigner, PaymentIntent, Quote,
+    NewPaymentIntent, NewQuote, NewSigner, PaymentIntent, Quote, WebhookDelivery,
 };
 use crate::schema;
 use crate::DbError;
@@ -489,6 +489,95 @@ pub async fn get_deposit_address_unscoped(
         .filter(schema::deposit_addresses::id.eq(id))
         .select(DepositAddress::as_select())
         .first::<DepositAddress>(conn)
+        .await
+        .optional()
+        .map_err(DbError::from)
+}
+
+/// Fetch all active assets joined with their networks.
+///
+/// # Errors
+/// Returns `DbError::Query` if the query fails.
+pub async fn get_active_assets(
+    conn: &mut AsyncPgConnection,
+) -> Result<Vec<(Asset, Network)>, DbError> {
+    schema::assets::table
+        .inner_join(schema::networks::table.on(schema::networks::id.eq(schema::assets::network_id)))
+        .filter(schema::assets::is_active.eq(true))
+        .select((Asset::as_select(), Network::as_select()))
+        .load::<(Asset, Network)>(conn)
+        .await
+        .map_err(DbError::from)
+}
+
+/// Fetch an asset by its CAIP-19 identifier.
+///
+/// # Errors
+/// Returns `DbError::Query` if the query fails.
+pub async fn get_asset_by_caip19(
+    conn: &mut AsyncPgConnection,
+    caip19: &str,
+) -> Result<Option<Asset>, DbError> {
+    schema::assets::table
+        .filter(schema::assets::caip19.eq(caip19))
+        .filter(schema::assets::is_active.eq(true))
+        .select(Asset::as_select())
+        .first::<Asset>(conn)
+        .await
+        .optional()
+        .map_err(DbError::from)
+}
+
+/// List webhook deliveries for a merchant, ordered by `created_at` desc.
+///
+/// # Errors
+/// Returns `DbError::Query` if the query fails.
+pub async fn list_webhook_deliveries(
+    conn: &mut AsyncPgConnection,
+    merchant_id: &str,
+    limit: i64,
+    cursor: Option<(&chrono::DateTime<chrono::Utc>, &str)>,
+) -> Result<Vec<WebhookDelivery>, DbError> {
+    let mut query = schema::webhook_deliveries::table
+        .filter(schema::webhook_deliveries::merchant_id.eq(merchant_id))
+        .order((
+            schema::webhook_deliveries::created_at.desc(),
+            schema::webhook_deliveries::id.desc(),
+        ))
+        .select(WebhookDelivery::as_select())
+        .limit(limit)
+        .into_boxed();
+
+    if let Some((cursor_time, cursor_id)) = cursor {
+        query = query.filter(
+            schema::webhook_deliveries::created_at.lt(cursor_time).or(
+                schema::webhook_deliveries::created_at
+                    .eq(cursor_time)
+                    .and(schema::webhook_deliveries::id.lt(cursor_id)),
+            ),
+        );
+    }
+
+    query
+        .load::<WebhookDelivery>(conn)
+        .await
+        .map_err(DbError::from)
+}
+
+/// Fetch a single webhook delivery by ID, scoped to a merchant.
+///
+/// # Errors
+/// Returns `DbError::Query` if the query fails.
+pub async fn get_webhook_delivery(
+    conn: &mut AsyncPgConnection,
+    id: &str,
+    merchant_id: &str,
+) -> Result<Option<WebhookDelivery>, DbError> {
+    schema::webhook_deliveries::table
+        .filter(schema::webhook_deliveries::id.eq(id))
+        .filter(schema::webhook_deliveries::merchant_id.eq(merchant_id))
+        .select(WebhookDelivery::as_select())
+        .first::<WebhookDelivery>(conn)
         .await
         .optional()
         .map_err(DbError::from)

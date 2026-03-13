@@ -1,63 +1,9 @@
 mod common;
 
 use axum::http::{Request, StatusCode};
-use http_body_util::BodyExt;
-use kassi_db::diesel::prelude::*;
-use kassi_db::diesel_async::RunQueryDsl;
-use kassi_db::schema;
-use kassi_server::AppState;
 use tower::ServiceExt;
 
-use common::{authenticate_with_key, eip191_sign, TestContext};
-
-async fn request(
-    state: &AppState,
-    method: &str,
-    path: &str,
-    token: &str,
-    body: Option<serde_json::Value>,
-) -> (StatusCode, serde_json::Value) {
-    let builder = match method {
-        "GET" => Request::get(path),
-        "POST" => Request::post(path),
-        "DELETE" => Request::delete(path),
-        _ => panic!("unsupported method"),
-    };
-
-    let builder = builder.header("authorization", format!("Bearer {token}"));
-
-    let req = if let Some(json) = body {
-        builder
-            .header("content-type", "application/json")
-            .body(axum::body::Body::from(serde_json::to_vec(&json).unwrap()))
-            .unwrap()
-    } else {
-        builder.body(axum::body::Body::empty()).unwrap()
-    };
-
-    let resp = kassi_server::app(state.clone()).oneshot(req).await.unwrap();
-
-    let status = resp.status();
-    let body = resp.into_body().collect().await.unwrap().to_bytes();
-    (status, serde_json::from_slice(&body).unwrap_or_default())
-}
-
-async fn seed_network(state: &AppState, network_id: &str, display_name: &str) {
-    let mut conn = state.db.get().await.unwrap();
-    kassi_db::diesel::insert_into(schema::networks::table)
-        .values((
-            schema::networks::id.eq(network_id),
-            schema::networks::display_name.eq(display_name),
-            schema::networks::block_time_ms.eq(12000),
-            schema::networks::confirmations.eq(12),
-            schema::networks::is_active.eq(true),
-        ))
-        .on_conflict(schema::networks::id)
-        .do_nothing()
-        .execute(&mut conn)
-        .await
-        .unwrap();
-}
+use common::{authenticate_with_key, eip191_sign, request, seed_network, TestContext};
 
 fn sign_create_message(
     key: &k256::ecdsa::SigningKey,
