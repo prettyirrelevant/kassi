@@ -26,7 +26,7 @@ async fn main() {
 
     tracing::info!("listening on {addr}");
 
-    axum::serve(listener, app(AppState { db }))
+    axum::serve(listener, app(AppState { db, config }))
         .with_graceful_shutdown(shutdown_signal())
         .await
         .expect("server error");

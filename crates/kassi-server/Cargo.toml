@@ -8,11 +8,17 @@ kassi-db = { path = "../kassi-db" }
 kassi-types = { path = "../kassi-types" }
 
 axum = "0.8"
+bs58 = "0.5"
 chrono = "0.4"
+ed25519-dalek = { version = "2", features = ["std"] }
 envy = "0.4"
+hex = "0.4"
+jsonwebtoken = "9"
+nanoid = { workspace = true }
 serde = { workspace = true }
 serde_json = "1"
 sha2 = "0.10"
+siwe = "0.6"
 thiserror = { workspace = true }
 tokio = { version = "1", features = ["full"] }
 tower-http = { version = "0.6", features = ["trace", "cors"] }
@@ -20,8 +26,11 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 [dev-dependencies]
+alloy-primitives = "1"
 http-body-util = "0.1"
 hyper = "1"
+k256 = { version = "0.13", features = ["ecdsa"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
 tower = { version = "0.5", features = ["util"] }
 
 [lints]

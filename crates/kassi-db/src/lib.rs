@@ -1,6 +1,9 @@
 pub mod models;
 pub mod schema;
 
+pub use diesel;
+pub use diesel_async;
+
 use diesel_async::pooled_connection::bb8::Pool;
 use diesel_async::pooled_connection::AsyncDieselConnectionManager;
 use diesel_async::AsyncPgConnection;
@@ -11,6 +14,9 @@ pub type DbPool = Pool<AsyncPgConnection>;
 pub enum DbError {
     #[error("pool error: {0}")]
     Pool(String),
+
+    #[error("query error: {0}")]
+    Query(#[from] diesel::result::Error),
 }
 
 /// Creates a bb8 connection pool for the given Postgres database.

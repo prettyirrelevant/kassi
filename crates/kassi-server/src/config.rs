@@ -4,9 +4,11 @@ fn default_port() -> u16 {
     3000
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct Config {
     pub database_url: String,
+    pub session_jwt_secret: String,
+    pub api_key_prefix: String,
     #[serde(default = "default_port")]
     pub port: u16,
 }
