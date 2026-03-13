@@ -468,10 +468,7 @@ pub async fn insert_ledger_entry(
 ///
 /// # Errors
 /// Returns `DbError::Query` if the insert fails.
-pub async fn insert_job(
-    conn: &mut AsyncPgConnection,
-    values: NewJob<'_>,
-) -> Result<Job, DbError> {
+pub async fn insert_job(conn: &mut AsyncPgConnection, values: NewJob<'_>) -> Result<Job, DbError> {
     diesel::insert_into(schema::jobs::table)
         .values(values)
         .returning(Job::as_returning())
@@ -497,8 +494,8 @@ pub async fn get_deposit_address_unscoped(
         .map_err(DbError::from)
 }
 
-/// Load refund ledger entries for a merchant, ordered by created_at desc.
-/// Joins through deposit_addresses to scope by merchant.
+/// Load refund ledger entries for a merchant, ordered by `created_at` desc.
+/// Joins through `deposit_addresses` to scope by merchant.
 ///
 /// # Errors
 /// Returns `DbError::Query` if the query fails.
@@ -525,11 +522,11 @@ pub async fn list_refund_ledger_entries(
 
     if let Some((cursor_time, cursor_id)) = cursor {
         query = query.filter(
-            schema::ledger_entries::created_at
-                .lt(cursor_time)
-                .or(schema::ledger_entries::created_at
+            schema::ledger_entries::created_at.lt(cursor_time).or(
+                schema::ledger_entries::created_at
                     .eq(cursor_time)
-                    .and(schema::ledger_entries::id.lt(cursor_id))),
+                    .and(schema::ledger_entries::id.lt(cursor_id)),
+            ),
         );
     }
 

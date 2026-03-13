@@ -5,6 +5,7 @@ mod merchants;
 mod payment_intents;
 mod refunds;
 mod settlement_destinations;
+mod shared;
 
 use axum::Router;
 

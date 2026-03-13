@@ -72,7 +72,9 @@ async fn seed_asset(
         .values((
             schema::assets::id.eq(asset_id),
             schema::assets::network_id.eq(network_id),
-            schema::assets::caip19.eq(format!("{network_id}/erc20:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")),
+            schema::assets::caip19.eq(format!(
+                "{network_id}/erc20:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            )),
             schema::assets::symbol.eq(symbol),
             schema::assets::name.eq(symbol),
             schema::assets::decimals.eq(decimals),
@@ -86,6 +88,7 @@ async fn seed_asset(
         .unwrap();
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn seed_ledger_entry(
     state: &AppState,
     deposit_address_id: &str,
@@ -124,7 +127,15 @@ mod create {
         let (token, _) = authenticate(&ctx.state).await;
 
         seed_network(&ctx.state, "eip155:8453", "Base").await;
-        seed_asset(&ctx.state, "ast_usdc_base", "eip155:8453", "USDC", 6, "usd-coin").await;
+        seed_asset(
+            &ctx.state,
+            "ast_usdc_base",
+            "eip155:8453",
+            "USDC",
+            6,
+            "usd-coin",
+        )
+        .await;
         ctx.fake_prices.set_price("usd-coin", 1.0168);
 
         let (status, json) = request(
@@ -178,7 +189,15 @@ mod create {
         let (token, _) = authenticate(&ctx.state).await;
 
         seed_network(&ctx.state, "eip155:8453", "Base").await;
-        seed_asset(&ctx.state, "ast_usdc_base", "eip155:8453", "USDC", 6, "usd-coin").await;
+        seed_asset(
+            &ctx.state,
+            "ast_usdc_base",
+            "eip155:8453",
+            "USDC",
+            6,
+            "usd-coin",
+        )
+        .await;
         ctx.fake_prices.set_price("usd-coin", 1.0168);
 
         let (status, json) = request(
@@ -209,7 +228,15 @@ mod create {
         let (token, _) = authenticate(&ctx.state).await;
 
         seed_network(&ctx.state, "eip155:8453", "Base").await;
-        seed_asset(&ctx.state, "ast_usdc_base", "eip155:8453", "USDC", 6, "usd-coin").await;
+        seed_asset(
+            &ctx.state,
+            "ast_usdc_base",
+            "eip155:8453",
+            "USDC",
+            6,
+            "usd-coin",
+        )
+        .await;
         ctx.fake_prices.set_price("usd-coin", 1.0);
 
         let before = Utc::now();
@@ -264,7 +291,10 @@ mod create {
         assert_eq!(json["error"]["code"].as_str().unwrap(), "validation_failed");
 
         let details = json["error"]["details"].as_array().unwrap();
-        let fields: Vec<&str> = details.iter().map(|d| d["field"].as_str().unwrap()).collect();
+        let fields: Vec<&str> = details
+            .iter()
+            .map(|d| d["field"].as_str().unwrap())
+            .collect();
         assert!(fields.contains(&"asset_id"));
         assert!(fields.contains(&"fiat_amount"));
         assert!(fields.contains(&"fiat_currency"));
@@ -341,7 +371,15 @@ mod create {
         let (token, _) = authenticate(&ctx.state).await;
 
         seed_network(&ctx.state, "eip155:8453", "Base").await;
-        seed_asset(&ctx.state, "ast_usdc_base", "eip155:8453", "USDC", 6, "usd-coin").await;
+        seed_asset(
+            &ctx.state,
+            "ast_usdc_base",
+            "eip155:8453",
+            "USDC",
+            6,
+            "usd-coin",
+        )
+        .await;
         // deliberately not setting a price in fake_prices
 
         let (status, json) = request(
@@ -392,7 +430,15 @@ mod create {
         let (token, _) = authenticate(&ctx.state).await;
 
         seed_network(&ctx.state, "eip155:8453", "Base").await;
-        seed_asset(&ctx.state, "ast_usdc_base", "eip155:8453", "USDC", 6, "usd-coin").await;
+        seed_asset(
+            &ctx.state,
+            "ast_usdc_base",
+            "eip155:8453",
+            "USDC",
+            6,
+            "usd-coin",
+        )
+        .await;
         ctx.fake_prices.set_price("usd-coin", 1.0);
 
         request(
@@ -444,7 +490,15 @@ mod list {
         let (token, _) = authenticate(&ctx.state).await;
 
         seed_network(&ctx.state, "eip155:8453", "Base").await;
-        seed_asset(&ctx.state, "ast_usdc_base", "eip155:8453", "USDC", 6, "usd-coin").await;
+        seed_asset(
+            &ctx.state,
+            "ast_usdc_base",
+            "eip155:8453",
+            "USDC",
+            6,
+            "usd-coin",
+        )
+        .await;
         ctx.fake_prices.set_price("usd-coin", 1.0);
 
         // create two intents
@@ -498,7 +552,15 @@ mod list {
         let (token, _) = authenticate(&ctx.state).await;
 
         seed_network(&ctx.state, "eip155:8453", "Base").await;
-        seed_asset(&ctx.state, "ast_usdc_base", "eip155:8453", "USDC", 6, "usd-coin").await;
+        seed_asset(
+            &ctx.state,
+            "ast_usdc_base",
+            "eip155:8453",
+            "USDC",
+            6,
+            "usd-coin",
+        )
+        .await;
         ctx.fake_prices.set_price("usd-coin", 1.0);
 
         // create an intent (will be "pending")
@@ -567,7 +629,15 @@ mod list {
         let ctx = TestContext::with_kms().await;
 
         seed_network(&ctx.state, "eip155:8453", "Base").await;
-        seed_asset(&ctx.state, "ast_usdc_base", "eip155:8453", "USDC", 6, "usd-coin").await;
+        seed_asset(
+            &ctx.state,
+            "ast_usdc_base",
+            "eip155:8453",
+            "USDC",
+            6,
+            "usd-coin",
+        )
+        .await;
         ctx.fake_prices.set_price("usd-coin", 1.0);
 
         let (token_a, _) = authenticate(&ctx.state).await;
@@ -600,7 +670,15 @@ mod get {
         let (token, _) = authenticate(&ctx.state).await;
 
         seed_network(&ctx.state, "eip155:8453", "Base").await;
-        seed_asset(&ctx.state, "ast_usdc_base", "eip155:8453", "USDC", 6, "usd-coin").await;
+        seed_asset(
+            &ctx.state,
+            "ast_usdc_base",
+            "eip155:8453",
+            "USDC",
+            6,
+            "usd-coin",
+        )
+        .await;
         ctx.fake_prices.set_price("usd-coin", 1.0);
 
         let (_, created) = request(
@@ -658,7 +736,10 @@ mod get {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0]["entry_type"].as_str().unwrap(), "deposit");
         assert_eq!(entries[0]["amount"].as_str().unwrap(), "10000000");
-        assert_eq!(entries[0]["deposit_address"]["id"].as_str().unwrap(), dep_id);
+        assert_eq!(
+            entries[0]["deposit_address"]["id"].as_str().unwrap(),
+            dep_id
+        );
     }
 
     #[tokio::test]
@@ -676,7 +757,10 @@ mod get {
         .await;
 
         assert_eq!(status, StatusCode::NOT_FOUND);
-        assert_eq!(json["error"]["code"].as_str().unwrap(), "resource_not_found");
+        assert_eq!(
+            json["error"]["code"].as_str().unwrap(),
+            "resource_not_found"
+        );
     }
 
     #[tokio::test]
@@ -684,7 +768,15 @@ mod get {
         let ctx = TestContext::with_kms().await;
 
         seed_network(&ctx.state, "eip155:8453", "Base").await;
-        seed_asset(&ctx.state, "ast_usdc_base", "eip155:8453", "USDC", 6, "usd-coin").await;
+        seed_asset(
+            &ctx.state,
+            "ast_usdc_base",
+            "eip155:8453",
+            "USDC",
+            6,
+            "usd-coin",
+        )
+        .await;
         ctx.fake_prices.set_price("usd-coin", 1.0);
 
         let (token_a, _) = authenticate(&ctx.state).await;
@@ -723,7 +815,15 @@ mod get {
         let (token, _) = authenticate(&ctx.state).await;
 
         seed_network(&ctx.state, "eip155:8453", "Base").await;
-        seed_asset(&ctx.state, "ast_usdc_base", "eip155:8453", "USDC", 6, "usd-coin").await;
+        seed_asset(
+            &ctx.state,
+            "ast_usdc_base",
+            "eip155:8453",
+            "USDC",
+            6,
+            "usd-coin",
+        )
+        .await;
         ctx.fake_prices.set_price("usd-coin", 1.0);
 
         let (_, created) = request(
@@ -751,7 +851,10 @@ mod get {
         .await;
 
         assert_eq!(status, StatusCode::OK);
-        assert!(json["data"]["ledger_entries"].as_array().unwrap().is_empty());
+        assert!(json["data"]["ledger_entries"]
+            .as_array()
+            .unwrap()
+            .is_empty());
         assert!(!json["data"]["quotes"].as_array().unwrap().is_empty());
     }
 }

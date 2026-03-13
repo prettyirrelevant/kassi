@@ -4,7 +4,7 @@ fn default_port() -> u16 {
     3000
 }
 
-fn default_quote_lock_duration_secs() -> u64 {
+fn default_quote_lock_duration_secs() -> i64 {
     1800 // 30 minutes
 }
 
@@ -19,7 +19,7 @@ pub struct Config {
     #[serde(default = "default_port")]
     pub port: u16,
     #[serde(default = "default_quote_lock_duration_secs")]
-    pub quote_lock_duration_secs: u64,
+    pub quote_lock_duration_secs: i64,
 }
 
 impl Config {

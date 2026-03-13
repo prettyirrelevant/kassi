@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use axum::extract::{Path, Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::{DateTime, Utc};
 use kassi_db::diesel::prelude::*;
 use kassi_db::diesel_async::RunQueryDsl;
@@ -11,10 +10,12 @@ use kassi_db::models::{
     DepositAddress, LedgerEntry, Network, NetworkAddress, NewDepositAddress, NewNetworkAddress,
 };
 use kassi_db::schema;
-use kassi_signer::Namespace;
 use kassi_types::{EntityId, EntityPrefix};
 use serde::{Deserialize, Serialize};
 
+use super::shared::{
+    self, AssetEmbed, DepositAddressEmbed, LedgerEntryResponse, NetworkEmbed as SharedNetworkEmbed,
+};
 use crate::errors::{ServerError, ValidationDetail};
 use crate::extractors::AnyAuth;
 use crate::response::{ApiList, ApiSuccess, ListMeta};
@@ -22,14 +23,15 @@ use crate::AppState;
 
 // -- response types --
 
+/// Extended network embed with `created_at` (only needed for deposit address responses).
 #[derive(Serialize)]
-struct NetworkEmbed {
+struct NetworkEmbedFull {
     id: String,
     display_name: String,
     created_at: DateTime<Utc>,
 }
 
-impl From<&Network> for NetworkEmbed {
+impl From<&Network> for NetworkEmbedFull {
     fn from(n: &Network) -> Self {
         Self {
             id: n.id.clone(),
@@ -42,7 +44,7 @@ impl From<&Network> for NetworkEmbed {
 #[derive(Serialize)]
 struct NetworkAddressResponse {
     id: String,
-    network: NetworkEmbed,
+    network: NetworkEmbedFull,
     address: String,
 }
 
@@ -53,37 +55,6 @@ struct DepositAddressResponse {
     label: Option<String>,
     address_type: String,
     network_addresses: Vec<NetworkAddressResponse>,
-    created_at: DateTime<Utc>,
-}
-
-#[derive(Serialize)]
-struct AssetEmbed {
-    id: String,
-    symbol: String,
-    decimals: i32,
-}
-
-#[derive(Serialize)]
-struct DepositAddressEmbed {
-    id: String,
-    address: String,
-}
-
-#[derive(Serialize)]
-struct LedgerEntryResponse {
-    id: String,
-    deposit_address: DepositAddressEmbed,
-    payment_intent_id: Option<String>,
-    asset: AssetEmbed,
-    network: NetworkEmbed,
-    entry_type: String,
-    status: String,
-    amount: String,
-    fee_amount: Option<String>,
-    sender: Option<String>,
-    destination: Option<String>,
-    onchain_ref: String,
-    reason: Option<String>,
     created_at: DateTime<Utc>,
 }
 
@@ -103,58 +74,10 @@ struct PaginationParams {
 
 // -- helpers --
 
-fn parse_chain_id_for_derivation(network_id: &str, namespace: &str) -> Result<u64, ServerError> {
-    match namespace {
-        "eip155" => network_id
-            .strip_prefix("eip155:")
-            .ok_or_else(|| ServerError::BadRequest("invalid eip155 network id".into()))?
-            .parse::<u64>()
-            .map_err(|_| ServerError::BadRequest("invalid evm chain id".into())),
-        "solana" => Ok(501),
-        _ => Err(ServerError::BadRequest(format!(
-            "unsupported namespace: {namespace}"
-        ))),
-    }
-}
-
-fn namespace_from_str(s: &str) -> Result<Namespace, ServerError> {
-    match s {
-        "eip155" => Ok(Namespace::Evm),
-        "solana" => Ok(Namespace::Solana),
-        _ => Err(ServerError::BadRequest(format!(
-            "unsupported namespace: {s}"
-        ))),
-    }
-}
-
-fn encode_cursor(created_at: &DateTime<Utc>, id: &str) -> String {
-    URL_SAFE_NO_PAD.encode(format!("{}|{}", created_at.to_rfc3339(), id))
-}
-
-fn decode_cursor(cursor: &str) -> Result<(DateTime<Utc>, String), ServerError> {
-    let raw = String::from_utf8(
-        URL_SAFE_NO_PAD
-            .decode(cursor)
-            .map_err(|_| ServerError::BadRequest("invalid pagination cursor".into()))?,
-    )
-    .map_err(|_| ServerError::BadRequest("invalid pagination cursor".into()))?;
-
-    let (time_str, id) = raw
-        .split_once('|')
-        .ok_or_else(|| ServerError::BadRequest("invalid pagination cursor".into()))?;
-
-    Ok((
-        time_str
-            .parse()
-            .map_err(|_| ServerError::BadRequest("invalid pagination cursor".into()))?,
-        id.to_string(),
-    ))
-}
-
 fn network_address_response(na: NetworkAddress, net: &Network) -> NetworkAddressResponse {
     NetworkAddressResponse {
         id: na.id,
-        network: NetworkEmbed::from(net),
+        network: NetworkEmbedFull::from(net),
         address: na.address,
     }
 }
@@ -271,8 +194,8 @@ async fn create_deposit_address(
             kms,
             &auth.merchant_id,
             &encrypted_seed,
-            namespace_from_str(namespace_str)?,
-            parse_chain_id_for_derivation(&network.id, namespace_str)?,
+            shared::namespace_from_str(namespace_str)?,
+            shared::parse_chain_id_for_derivation(&network.id, namespace_str)?,
             next_index.cast_unsigned(),
         )
         .await
@@ -293,7 +216,7 @@ async fn create_deposit_address(
 
         network_address_responses.push(NetworkAddressResponse {
             id: nadr_id,
-            network: NetworkEmbed::from(network),
+            network: NetworkEmbedFull::from(network),
             address,
         });
     }
@@ -317,7 +240,11 @@ async fn list_deposit_addresses(
         .await
         .map_err(|e| kassi_db::DbError::Pool(e.to_string()))?;
 
-    let cursor = params.page.as_ref().map(|p| decode_cursor(p)).transpose()?;
+    let cursor = params
+        .page
+        .as_ref()
+        .map(|p| shared::decode_cursor(p))
+        .transpose()?;
 
     let mut query = schema::deposit_addresses::table
         .filter(schema::deposit_addresses::merchant_id.eq(&auth.merchant_id))
@@ -350,7 +277,8 @@ async fn list_deposit_addresses(
     }
 
     let next_page = if has_next {
-        rows.last().map(|da| encode_cursor(&da.created_at, &da.id))
+        rows.last()
+            .map(|da| shared::encode_cursor(&da.created_at, &da.id))
     } else {
         None
     };
@@ -399,8 +327,9 @@ async fn get_deposit_address(
         kassi_db::queries::load_network_addresses(&mut conn, &[&da.id]).await?,
     );
 
+    let nas = na_map.remove(&da.id).unwrap_or_default();
     Ok(ApiSuccess {
-        data: deposit_address_response(da.clone(), na_map.remove(&da.id).unwrap_or_default()),
+        data: deposit_address_response(da, nas),
     })
 }
 
@@ -429,7 +358,11 @@ async fn list_ledger_entries(
         .await?
         .unwrap_or_default();
 
-    let cursor = params.page.as_ref().map(|p| decode_cursor(p)).transpose()?;
+    let cursor = params
+        .page
+        .as_ref()
+        .map(|p| shared::decode_cursor(p))
+        .transpose()?;
 
     let mut query = schema::ledger_entries::table
         .filter(schema::ledger_entries::deposit_address_id.eq(&da.id))
@@ -462,7 +395,9 @@ async fn list_ledger_entries(
     }
 
     let next_page = if has_next {
-        entries.last().map(|e| encode_cursor(&e.created_at, &e.id))
+        entries
+            .last()
+            .map(|e| shared::encode_cursor(&e.created_at, &e.id))
     } else {
         None
     };
@@ -477,35 +412,20 @@ async fn list_ledger_entries(
     let network_map: HashMap<&str, &Network> =
         networks.iter().map(|n| (n.id.as_str(), n)).collect();
 
+    let dep_embed = DepositAddressEmbed::new(&da, &dep_address_str);
+
     let data = entries
-        .iter()
+        .into_iter()
         .filter_map(|entry| {
             let asset = asset_map.get(entry.asset_id.as_str())?;
             let network = network_map.get(entry.network_id.as_str())?;
 
-            Some(LedgerEntryResponse {
-                id: entry.id.clone(),
-                deposit_address: DepositAddressEmbed {
-                    id: da.id.clone(),
-                    address: dep_address_str.clone(),
-                },
-                payment_intent_id: entry.payment_intent_id.clone(),
-                asset: AssetEmbed {
-                    id: asset.id.clone(),
-                    symbol: asset.symbol.clone(),
-                    decimals: asset.decimals,
-                },
-                network: NetworkEmbed::from(*network),
-                entry_type: entry.entry_type.clone(),
-                status: entry.status.clone(),
-                amount: entry.amount.clone(),
-                fee_amount: entry.fee_amount.clone(),
-                sender: entry.sender.clone(),
-                destination: entry.destination.clone(),
-                onchain_ref: entry.onchain_ref.clone(),
-                reason: entry.reason.clone(),
-                created_at: entry.created_at,
-            })
+            Some(LedgerEntryResponse::from_entry(
+                entry,
+                DepositAddressEmbed::from_parts(dep_embed.id.clone(), dep_embed.address.clone()),
+                AssetEmbed::from(*asset),
+                SharedNetworkEmbed::from(*network),
+            ))
         })
         .collect();
 

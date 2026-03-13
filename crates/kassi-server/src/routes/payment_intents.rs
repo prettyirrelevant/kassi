@@ -1,9 +1,9 @@
 use std::collections::HashMap;
+use std::str::FromStr;
 
 use axum::extract::{Path, Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::{DateTime, Duration, Utc};
 use kassi_db::diesel::prelude::*;
 use kassi_db::diesel_async::RunQueryDsl;
@@ -12,56 +12,17 @@ use kassi_db::models::{
     NewNetworkAddress, NewPaymentIntent, NewQuote, PaymentIntent,
 };
 use kassi_db::schema;
-use kassi_signer::Namespace;
 use kassi_types::{EntityId, EntityPrefix};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
 
+use super::shared::{self, AssetEmbed, DepositAddressEmbed, LedgerEntryResponse, NetworkEmbed};
 use crate::errors::{ServerError, ValidationDetail};
 use crate::extractors::AnyAuth;
 use crate::response::{ApiList, ApiSuccess, ListMeta};
 use crate::AppState;
 
 // -- response types --
-
-#[derive(Serialize)]
-struct NetworkEmbed {
-    id: String,
-    display_name: String,
-}
-
-impl From<&Network> for NetworkEmbed {
-    fn from(n: &Network) -> Self {
-        Self {
-            id: n.id.clone(),
-            display_name: n.display_name.clone(),
-        }
-    }
-}
-
-#[derive(Serialize)]
-struct AssetEmbed {
-    id: String,
-    symbol: String,
-    decimals: i32,
-}
-
-impl From<&Asset> for AssetEmbed {
-    fn from(a: &Asset) -> Self {
-        Self {
-            id: a.id.clone(),
-            symbol: a.symbol.clone(),
-            decimals: a.decimals,
-        }
-    }
-}
-
-#[derive(Serialize)]
-struct DepositAddressEmbed {
-    id: String,
-    address: String,
-}
 
 #[derive(Serialize)]
 struct QuoteResponse {
@@ -74,40 +35,7 @@ struct QuoteResponse {
 }
 
 #[derive(Serialize)]
-struct LedgerEntryResponse {
-    id: String,
-    deposit_address: DepositAddressEmbed,
-    payment_intent_id: Option<String>,
-    asset: AssetEmbed,
-    network: NetworkEmbed,
-    entry_type: String,
-    status: String,
-    amount: String,
-    fee_amount: Option<String>,
-    sender: Option<String>,
-    destination: Option<String>,
-    onchain_ref: String,
-    reason: Option<String>,
-    created_at: DateTime<Utc>,
-}
-
-#[derive(Serialize)]
 struct PaymentIntentResponse {
-    id: String,
-    deposit_address: DepositAddressEmbed,
-    merchant_id: String,
-    fiat_amount: String,
-    fiat_currency: String,
-    status: String,
-    quotes: Vec<QuoteResponse>,
-    confirmed_at: Option<DateTime<Utc>>,
-    expires_at: DateTime<Utc>,
-    created_at: DateTime<Utc>,
-    updated_at: DateTime<Utc>,
-}
-
-#[derive(Serialize)]
-struct PaymentIntentListItem {
     id: String,
     deposit_address: DepositAddressEmbed,
     merchant_id: String,
@@ -155,54 +83,6 @@ struct ListParams {
 
 // -- helpers --
 
-fn encode_cursor(created_at: &DateTime<Utc>, id: &str) -> String {
-    URL_SAFE_NO_PAD.encode(format!("{}|{}", created_at.to_rfc3339(), id))
-}
-
-fn decode_cursor(cursor: &str) -> Result<(DateTime<Utc>, String), ServerError> {
-    let raw = String::from_utf8(
-        URL_SAFE_NO_PAD
-            .decode(cursor)
-            .map_err(|_| ServerError::BadRequest("invalid pagination cursor".into()))?,
-    )
-    .map_err(|_| ServerError::BadRequest("invalid pagination cursor".into()))?;
-
-    let (time_str, id) = raw
-        .split_once('|')
-        .ok_or_else(|| ServerError::BadRequest("invalid pagination cursor".into()))?;
-
-    Ok((
-        time_str
-            .parse()
-            .map_err(|_| ServerError::BadRequest("invalid pagination cursor".into()))?,
-        id.to_string(),
-    ))
-}
-
-fn parse_chain_id_for_derivation(network_id: &str, namespace: &str) -> Result<u64, ServerError> {
-    match namespace {
-        "eip155" => network_id
-            .strip_prefix("eip155:")
-            .ok_or_else(|| ServerError::BadRequest("invalid eip155 network id".into()))?
-            .parse::<u64>()
-            .map_err(|_| ServerError::BadRequest("invalid evm chain id".into())),
-        "solana" => Ok(501),
-        _ => Err(ServerError::BadRequest(format!(
-            "unsupported namespace: {namespace}"
-        ))),
-    }
-}
-
-fn namespace_from_str(s: &str) -> Result<Namespace, ServerError> {
-    match s {
-        "eip155" => Ok(Namespace::Evm),
-        "solana" => Ok(Namespace::Solana),
-        _ => Err(ServerError::BadRequest(format!(
-            "unsupported namespace: {s}"
-        ))),
-    }
-}
-
 const VALID_STATUSES: &[&str] = &["pending", "partial", "confirmed", "expired"];
 
 const SUPPORTED_FIAT_CURRENCIES: &[&str] = &["USD"];
@@ -237,16 +117,6 @@ fn compute_crypto_amount(
     Ok(crypto.to_string())
 }
 
-fn build_deposit_address_embed(
-    da: &DepositAddress,
-    address: &str,
-) -> DepositAddressEmbed {
-    DepositAddressEmbed {
-        id: da.id.clone(),
-        address: address.to_string(),
-    }
-}
-
 // -- routes --
 
 pub fn routes() -> Router<AppState> {
@@ -258,6 +128,7 @@ pub fn routes() -> Router<AppState> {
         .route("/payment-intents/{id}", get(get_payment_intent))
 }
 
+#[allow(clippy::too_many_lines)]
 async fn create_payment_intent(
     State(state): State<AppState>,
     auth: AnyAuth,
@@ -343,11 +214,13 @@ async fn create_payment_intent(
     // validate asset exists and is active
     let asset = kassi_db::queries::get_asset_by_id(&mut conn, asset_id)
         .await?
-        .ok_or_else(|| ServerError::ValidationFailed(vec![ValidationDetail {
-            field: "asset_id".into(),
-            code: "invalid_field_value",
-            message: format!("no active asset found with id '{asset_id}'."),
-        }]))?;
+        .ok_or_else(|| {
+            ServerError::ValidationFailed(vec![ValidationDetail {
+                field: "asset_id".into(),
+                code: "invalid_field_value",
+                message: format!("no active asset found with id '{asset_id}'."),
+            }])
+        })?;
 
     // fetch exchange rate
     let coingecko_id = asset.coingecko_id.as_deref().ok_or_else(|| {
@@ -361,23 +234,22 @@ async fn create_payment_intent(
         .fetch_prices(&[coingecko_id.to_string()])
         .await
         .map_err(|e| {
-            ServerError::BadRequest(format!(
-                "failed to fetch price for asset '{asset_id}': {e}"
-            ))
+            ServerError::BadRequest(format!("failed to fetch price for asset '{asset_id}': {e}"))
         })?;
 
     let usd_price = prices
         .into_iter()
         .next()
         .ok_or_else(|| {
-            ServerError::BadRequest(format!(
-                "no price returned for asset '{asset_id}'."
-            ))
+            ServerError::BadRequest(format!("no price returned for asset '{asset_id}'."))
         })?
         .usd_price;
 
     // format with full precision to avoid f64 display artifacts
-    let exchange_rate = format!("{usd_price:.10}").trim_end_matches('0').trim_end_matches('.').to_string();
+    let exchange_rate = format!("{usd_price:.10}")
+        .trim_end_matches('0')
+        .trim_end_matches('.')
+        .to_string();
 
     // cache the fetched price
     let cache_id = EntityId::new(EntityPrefix::PriceCache).to_string();
@@ -412,10 +284,7 @@ async fn create_payment_intent(
         .optional()
         .map_err(kassi_db::DbError::from)?
         .ok_or_else(|| {
-            ServerError::BadRequest(format!(
-                "network '{}' is not active.",
-                asset.network_id
-            ))
+            ServerError::BadRequest(format!("network '{}' is not active.", asset.network_id))
         })?;
 
     // create one_off deposit address
@@ -447,8 +316,8 @@ async fn create_payment_intent(
         kms,
         &auth.merchant_id,
         &encrypted_seed,
-        namespace_from_str(namespace_str)?,
-        parse_chain_id_for_derivation(&network.id, namespace_str)?,
+        shared::namespace_from_str(namespace_str)?,
+        shared::parse_chain_id_for_derivation(&network.id, namespace_str)?,
         next_index.cast_unsigned(),
     )
     .await
@@ -468,9 +337,8 @@ async fn create_payment_intent(
     .await?;
 
     // create payment intent
-    let quote_duration_secs = state.config.quote_lock_duration_secs;
     let now = Utc::now();
-    let expires_at = now + Duration::seconds(quote_duration_secs as i64);
+    let expires_at = now + Duration::seconds(state.config.quote_lock_duration_secs);
 
     let pi_id = EntityId::new(EntityPrefix::PaymentIntent).to_string();
     let payment_intent = kassi_db::queries::insert_payment_intent(
@@ -503,7 +371,7 @@ async fn create_payment_intent(
 
     let response = PaymentIntentResponse {
         id: payment_intent.id,
-        deposit_address: build_deposit_address_embed(&deposit_address, &address),
+        deposit_address: DepositAddressEmbed::new(&deposit_address, &address),
         merchant_id: payment_intent.merchant_id,
         fiat_amount: payment_intent.fiat_amount,
         fiat_currency: payment_intent.fiat_currency,
@@ -525,11 +393,12 @@ async fn create_payment_intent(
     Ok(ApiSuccess::created(response))
 }
 
+#[allow(clippy::too_many_lines)]
 async fn list_payment_intents(
     State(state): State<AppState>,
     auth: AnyAuth,
     Query(params): Query<ListParams>,
-) -> Result<ApiList<PaymentIntentListItem>, ServerError> {
+) -> Result<ApiList<PaymentIntentResponse>, ServerError> {
     let limit = params.limit.unwrap_or(20).min(100);
 
     // validate status filter
@@ -538,10 +407,7 @@ async fn list_payment_intents(
             return Err(ServerError::ValidationFailed(vec![ValidationDetail {
                 field: "status".into(),
                 code: "invalid_field_value",
-                message: format!(
-                    "must be one of: {}.",
-                    VALID_STATUSES.join(", ")
-                ),
+                message: format!("must be one of: {}.", VALID_STATUSES.join(", ")),
             }]));
         }
     }
@@ -552,7 +418,11 @@ async fn list_payment_intents(
         .await
         .map_err(|e| kassi_db::DbError::Pool(e.to_string()))?;
 
-    let cursor = params.page.as_ref().map(|p| decode_cursor(p)).transpose()?;
+    let cursor = params
+        .page
+        .as_ref()
+        .map(|p| shared::decode_cursor(p))
+        .transpose()?;
 
     let mut query = schema::payment_intents::table
         .filter(schema::payment_intents::merchant_id.eq(&auth.merchant_id))
@@ -570,11 +440,11 @@ async fn list_payment_intents(
 
     if let Some((cursor_time, cursor_id)) = &cursor {
         query = query.filter(
-            schema::payment_intents::created_at
-                .lt(cursor_time)
-                .or(schema::payment_intents::created_at
+            schema::payment_intents::created_at.lt(cursor_time).or(
+                schema::payment_intents::created_at
                     .eq(cursor_time)
-                    .and(schema::payment_intents::id.lt(cursor_id))),
+                    .and(schema::payment_intents::id.lt(cursor_id)),
+            ),
         );
     }
 
@@ -590,13 +460,16 @@ async fn list_payment_intents(
 
     let next_page = if has_next {
         rows.last()
-            .map(|pi| encode_cursor(&pi.created_at, &pi.id))
+            .map(|pi| shared::encode_cursor(&pi.created_at, &pi.id))
     } else {
         None
     };
 
     // load first network address for each deposit address (for embed)
-    let dep_ids: Vec<&str> = rows.iter().map(|pi| pi.deposit_address_id.as_str()).collect();
+    let dep_ids: Vec<&str> = rows
+        .iter()
+        .map(|pi| pi.deposit_address_id.as_str())
+        .collect();
     let network_addresses: Vec<NetworkAddress> = if dep_ids.is_empty() {
         vec![]
     } else {
@@ -616,8 +489,7 @@ async fn list_payment_intents(
 
     // load quotes for all payment intents
     let pi_ids: Vec<&str> = rows.iter().map(|pi| pi.id.as_str()).collect();
-    let quotes =
-        kassi_db::queries::load_quotes_by_payment_intent_ids(&mut conn, &pi_ids).await?;
+    let quotes = kassi_db::queries::load_quotes_by_payment_intent_ids(&mut conn, &pi_ids).await?;
 
     // load assets for quotes
     let asset_ids: Vec<&str> = quotes.iter().map(|q| q.asset_id.as_str()).collect();
@@ -649,18 +521,19 @@ async fn list_payment_intents(
                 .get(pi.deposit_address_id.as_str())
                 .copied()
                 .unwrap_or("");
+            let quotes = quotes_map.remove(pi.id.as_str()).unwrap_or_default();
 
-            PaymentIntentListItem {
-                id: pi.id.clone(),
-                deposit_address: DepositAddressEmbed {
-                    id: pi.deposit_address_id.clone(),
-                    address: address_str.to_string(),
-                },
+            PaymentIntentResponse {
+                deposit_address: DepositAddressEmbed::from_parts(
+                    pi.deposit_address_id,
+                    address_str.to_string(),
+                ),
+                id: pi.id,
                 merchant_id: pi.merchant_id,
                 fiat_amount: pi.fiat_amount,
                 fiat_currency: pi.fiat_currency,
                 status: pi.status,
-                quotes: quotes_map.remove(pi.id.as_str()).unwrap_or_default(),
+                quotes,
                 confirmed_at: pi.confirmed_at,
                 expires_at: pi.expires_at,
                 created_at: pi.created_at,
@@ -704,15 +577,13 @@ async fn get_payment_intent(
         .await
         .map_err(kassi_db::DbError::from)?;
 
-    let dep_address_str =
-        kassi_db::queries::first_network_address_string(&mut conn, &da.id)
-            .await?
-            .unwrap_or_default();
+    let dep_address_str = kassi_db::queries::first_network_address_string(&mut conn, &da.id)
+        .await?
+        .unwrap_or_default();
 
     // load quotes
     let quotes =
-        kassi_db::queries::load_quotes_by_payment_intent_ids(&mut conn, &[pi.id.as_str()])
-            .await?;
+        kassi_db::queries::load_quotes_by_payment_intent_ids(&mut conn, &[pi.id.as_str()]).await?;
 
     let asset_ids: Vec<&str> = quotes.iter().map(|q| q.asset_id.as_str()).collect();
     let assets = kassi_db::queries::load_assets_by_ids(&mut conn, &asset_ids).await?;
@@ -746,10 +617,7 @@ async fn get_payment_intent(
         .map_err(kassi_db::DbError::from)?;
 
     // load assets and networks for ledger entries
-    let le_asset_ids: Vec<&str> = ledger_entries
-        .iter()
-        .map(|e| e.asset_id.as_str())
-        .collect();
+    let le_asset_ids: Vec<&str> = ledger_entries.iter().map(|e| e.asset_id.as_str()).collect();
     let le_network_ids: Vec<&str> = ledger_entries
         .iter()
         .map(|e| e.network_id.as_str())
@@ -763,37 +631,26 @@ async fn get_payment_intent(
     let le_network_map: HashMap<&str, &Network> =
         le_networks.iter().map(|n| (n.id.as_str(), n)).collect();
 
+    let dep_embed = DepositAddressEmbed::new(&da, &dep_address_str);
+
     let ledger_entry_responses: Vec<LedgerEntryResponse> = ledger_entries
-        .iter()
+        .into_iter()
         .filter_map(|entry| {
             let asset = le_asset_map.get(entry.asset_id.as_str())?;
             let network = le_network_map.get(entry.network_id.as_str())?;
-            Some(LedgerEntryResponse {
-                id: entry.id.clone(),
-                deposit_address: DepositAddressEmbed {
-                    id: da.id.clone(),
-                    address: dep_address_str.clone(),
-                },
-                payment_intent_id: entry.payment_intent_id.clone(),
-                asset: AssetEmbed::from(*asset),
-                network: NetworkEmbed::from(*network),
-                entry_type: entry.entry_type.clone(),
-                status: entry.status.clone(),
-                amount: entry.amount.clone(),
-                fee_amount: entry.fee_amount.clone(),
-                sender: entry.sender.clone(),
-                destination: entry.destination.clone(),
-                onchain_ref: entry.onchain_ref.clone(),
-                reason: entry.reason.clone(),
-                created_at: entry.created_at,
-            })
+            Some(LedgerEntryResponse::from_entry(
+                entry,
+                DepositAddressEmbed::from_parts(dep_embed.id.clone(), dep_embed.address.clone()),
+                AssetEmbed::from(*asset),
+                NetworkEmbed::from(*network),
+            ))
         })
         .collect();
 
     Ok(ApiSuccess {
         data: PaymentIntentDetailResponse {
             id: pi.id,
-            deposit_address: build_deposit_address_embed(&da, &dep_address_str),
+            deposit_address: dep_embed,
             merchant_id: pi.merchant_id,
             fiat_amount: pi.fiat_amount,
             fiat_currency: pi.fiat_currency,

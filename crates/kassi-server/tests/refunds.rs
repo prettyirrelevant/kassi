@@ -71,8 +71,9 @@ async fn seed_asset(
         .values((
             schema::assets::id.eq(asset_id),
             schema::assets::network_id.eq(network_id),
-            schema::assets::caip19
-                .eq(format!("{network_id}/erc20:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")),
+            schema::assets::caip19.eq(format!(
+                "{network_id}/erc20:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            )),
             schema::assets::symbol.eq(symbol),
             schema::assets::name.eq(symbol),
             schema::assets::decimals.eq(decimals),
@@ -86,7 +87,7 @@ async fn seed_asset(
         .unwrap();
 }
 
-/// Create a payment intent and return (pi_id, deposit_address_id).
+/// Create a payment intent and return (`pi_id`, `deposit_address_id`).
 async fn create_payment_intent(
     state: &AppState,
     token: &str,
@@ -294,7 +295,10 @@ mod payment_intent_refund {
 
         assert_eq!(status, StatusCode::BAD_REQUEST);
         let details = json["error"]["details"].as_array().unwrap();
-        let fields: Vec<&str> = details.iter().map(|d| d["field"].as_str().unwrap()).collect();
+        let fields: Vec<&str> = details
+            .iter()
+            .map(|d| d["field"].as_str().unwrap())
+            .collect();
         assert!(fields.contains(&"amount"));
         assert!(fields.contains(&"destination"));
     }
@@ -343,7 +347,10 @@ mod payment_intent_refund {
         .await;
 
         assert_eq!(status, StatusCode::NOT_FOUND);
-        assert_eq!(json["error"]["code"].as_str().unwrap(), "resource_not_found");
+        assert_eq!(
+            json["error"]["code"].as_str().unwrap(),
+            "resource_not_found"
+        );
     }
 
     #[tokio::test]
@@ -379,7 +386,15 @@ mod deposit_address_refund {
         let (token, _) = authenticate(&ctx.state).await;
 
         seed_network(&ctx.state, "eip155:8453", "Base").await;
-        seed_asset(&ctx.state, "ast_usdc_base", "eip155:8453", "USDC", 6, "usd-coin").await;
+        seed_asset(
+            &ctx.state,
+            "ast_usdc_base",
+            "eip155:8453",
+            "USDC",
+            6,
+            "usd-coin",
+        )
+        .await;
 
         // create a reusable deposit address
         let (status, dep_json) = request(
@@ -495,7 +510,10 @@ mod deposit_address_refund {
         .await;
 
         assert_eq!(status, StatusCode::NOT_FOUND);
-        assert_eq!(json["error"]["code"].as_str().unwrap(), "resource_not_found");
+        assert_eq!(
+            json["error"]["code"].as_str().unwrap(),
+            "resource_not_found"
+        );
     }
 }
 
