@@ -1,0 +1,13 @@
+template: testify
+dir: "internal/mocks"
+pkgname: mocks
+filename: "{{ .InterfaceName | snakecase }}.go"
+template-data:
+  unroll-variadic: true
+packages:
+  github.com/prettyirrelevant/kassi/internal/pricing:
+    interfaces:
+      Oracle: {}
+  github.com/prettyirrelevant/kassi/internal/signer:
+    interfaces:
+      KMS: {}

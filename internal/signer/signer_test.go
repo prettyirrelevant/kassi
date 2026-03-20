@@ -8,60 +8,41 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/mr-tron/base58"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+
+	"github.com/prettyirrelevant/kassi/internal/mocks"
 )
-
-type mockKMS struct {
-	keys map[string]bool
-}
-
-func newMockKMS() *mockKMS {
-	return &mockKMS{keys: make(map[string]bool)}
-}
-
-func (m *mockKMS) CreateKey(_ context.Context, name string) error {
-	m.keys[name] = true
-	return nil
-}
-
-func (m *mockKMS) Encrypt(_ context.Context, _ string, plaintext []byte) (string, error) {
-	return hex.EncodeToString(plaintext), nil
-}
-
-func (m *mockKMS) Decrypt(_ context.Context, _ string, ciphertext string) ([]byte, error) {
-	return hex.DecodeString(ciphertext)
-}
 
 var testSeed, _ = hex.DecodeString("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
 
 func TestNetworkRegistry(t *testing.T) {
 	t.Run("all entries have valid chain type", func(t *testing.T) {
 		for id, info := range networks {
-			if info.ChainType != "evm" && info.ChainType != "solana" {
-				t.Errorf("network %s has invalid chain type: %s", id, info.ChainType)
-			}
+			require.Contains(t, []string{"evm", "solana"}, info.ChainType, "network %s has invalid chain type", id)
 		}
 	})
 
 	t.Run("evm networks must have non-zero chain ID", func(t *testing.T) {
 		for id, info := range networks {
-			if info.ChainType == "evm" && info.ChainID == 0 {
-				t.Errorf("evm network %s has zero chain ID", id)
+			if info.ChainType == "evm" {
+				require.NotZero(t, info.ChainID, "evm network %s has zero chain ID", id)
 			}
 		}
 	})
 
 	t.Run("evm networks must have coin type 60", func(t *testing.T) {
 		for id, info := range networks {
-			if info.ChainType == "evm" && info.CoinType != 60 {
-				t.Errorf("evm network %s has coin type %d, expected 60", id, info.CoinType)
+			if info.ChainType == "evm" {
+				require.Equal(t, uint32(60), info.CoinType, "evm network %s", id)
 			}
 		}
 	})
 
 	t.Run("solana networks must have coin type 501", func(t *testing.T) {
 		for id, info := range networks {
-			if info.ChainType == "solana" && info.CoinType != 501 {
-				t.Errorf("solana network %s has coin type %d, expected 501", id, info.CoinType)
+			if info.ChainType == "solana" {
+				require.Equal(t, uint32(501), info.CoinType, "solana network %s", id)
 			}
 		}
 	})
@@ -72,139 +53,110 @@ func TestNetworkRegistry(t *testing.T) {
 			if info.ChainType != "evm" {
 				continue
 			}
-			if prev, ok := seen[info.ChainID]; ok {
-				t.Errorf("evm networks %s and %s share chain ID %d", prev, id, info.ChainID)
-			}
+			prev, exists := seen[info.ChainID]
+			require.False(t, exists, "evm networks %s and %s share chain ID %d", prev, id, info.ChainID)
 			seen[info.ChainID] = id
 		}
 	})
 
 	t.Run("lookup unknown network returns error", func(t *testing.T) {
-		if _, err := LookupNetwork("nonexistent"); err == nil {
-			t.Error("expected error for unknown network")
-		}
+		_, err := LookupNetwork("nonexistent")
+		require.Error(t, err)
 	})
 }
 
 func TestEVMDerivation(t *testing.T) {
 	t.Run("deterministic", func(t *testing.T) {
 		a1, err := deriveEVMAddress(testSeed, 60, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		a2, err := deriveEVMAddress(testSeed, 60, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if a1 != a2 {
-			t.Errorf("same inputs produced different addresses: %s vs %s", a1, a2)
-		}
+		require.NoError(t, err)
+		require.Equal(t, a1, a2)
 	})
 
 	t.Run("different indices produce different addresses", func(t *testing.T) {
-		a0, _ := deriveEVMAddress(testSeed, 60, 0)
-		a1, _ := deriveEVMAddress(testSeed, 60, 1)
-		if a0 == a1 {
-			t.Error("different indices produced the same address")
-		}
+		a0, err := deriveEVMAddress(testSeed, 60, 0)
+		require.NoError(t, err)
+		a1, err := deriveEVMAddress(testSeed, 60, 1)
+		require.NoError(t, err)
+		require.NotEqual(t, a0, a1)
 	})
 
 	t.Run("valid checksummed hex format", func(t *testing.T) {
 		addr, err := deriveEVMAddress(testSeed, 60, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(addr) != 42 || addr[:2] != "0x" {
-			t.Errorf("invalid EVM address format: %s", addr)
-		}
+		require.NoError(t, err)
+		require.Len(t, addr, 42)
+		require.Equal(t, "0x", addr[:2])
 	})
 }
 
 func TestSolanaDerivation(t *testing.T) {
 	t.Run("deterministic", func(t *testing.T) {
 		k1, err := deriveSolanaKey(testSeed, 501, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		k2, err := deriveSolanaKey(testSeed, 501, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if hex.EncodeToString(k1) != hex.EncodeToString(k2) {
-			t.Error("same inputs produced different keys")
-		}
+		require.NoError(t, err)
+		require.Equal(t, k1, k2)
 	})
 
 	t.Run("different indices produce different keys", func(t *testing.T) {
-		k0, _ := deriveSolanaKey(testSeed, 501, 0)
-		k1, _ := deriveSolanaKey(testSeed, 501, 1)
-		if hex.EncodeToString(k0) == hex.EncodeToString(k1) {
-			t.Error("different indices produced the same key")
-		}
+		k0, err := deriveSolanaKey(testSeed, 501, 0)
+		require.NoError(t, err)
+		k1, err := deriveSolanaKey(testSeed, 501, 1)
+		require.NoError(t, err)
+		require.NotEqual(t, k0, k1)
 	})
 
 	t.Run("produces valid base58 address", func(t *testing.T) {
 		key, err := deriveSolanaKey(testSeed, 501, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		pub := ed25519.NewKeyFromSeed(key).Public().(ed25519.PublicKey)
 		addr := base58.Encode(pub)
-		if len(addr) < 32 || len(addr) > 44 {
-			t.Errorf("unexpected solana address length: %d (%s)", len(addr), addr)
-		}
+		require.GreaterOrEqual(t, len(addr), 32)
+		require.LessOrEqual(t, len(addr), 44)
 	})
 }
 
 func TestCreateMerchantSeed(t *testing.T) {
-	kms := newMockKMS()
+	kms := mocks.NewMockKMS(t)
+	kms.EXPECT().CreateKey(mock.Anything, "kassi-merchant-mer_test123").Return(nil)
+	kms.EXPECT().Encrypt(mock.Anything, "kassi-merchant-mer_test123", mock.Anything).
+		RunAndReturn(func(_ context.Context, _ string, plaintext []byte) (string, error) {
+			return hex.EncodeToString(plaintext), nil
+		})
+
 	ciphertext, err := CreateMerchantSeed(t.Context(), kms, "mer_test123")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
-	t.Run("creates KMS key with correct name", func(t *testing.T) {
-		if !kms.keys["kassi-merchant-mer_test123"] {
-			t.Error("expected KMS key kassi-merchant-mer_test123 to be created")
-		}
-	})
-
-	t.Run("ciphertext decodes to recommended seed length", func(t *testing.T) {
-		seed, err := hex.DecodeString(ciphertext)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(seed) != int(hdkeychain.RecommendedSeedLen) {
-			t.Errorf("seed length %d, expected %d", len(seed), hdkeychain.RecommendedSeedLen)
-		}
-	})
+	seed, err := hex.DecodeString(ciphertext)
+	require.NoError(t, err)
+	require.Len(t, seed, int(hdkeychain.RecommendedSeedLen))
 }
 
 func TestDeriveAddress(t *testing.T) {
-	kms := newMockKMS()
-	ciphertext, err := CreateMerchantSeed(t.Context(), kms, "mer_derive")
-	if err != nil {
-		t.Fatal(err)
+	// create a fixed seed for deterministic tests
+	fixedSeed := testSeed
+	encryptedSeed := hex.EncodeToString(fixedSeed)
+
+	setupKMS := func(t *testing.T) *mocks.MockKMS {
+		kms := mocks.NewMockKMS(t)
+		kms.EXPECT().Decrypt(mock.Anything, "kassi-merchant-mer_derive", encryptedSeed).
+			Return(fixedSeed, nil)
+		return kms
 	}
 
 	t.Run("evm returns checksummed hex", func(t *testing.T) {
-		addr, err := DeriveAddress(t.Context(), kms, "mer_derive", ciphertext, "ethereum-mainnet", 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(addr) != 42 || addr[:2] != "0x" {
-			t.Errorf("invalid EVM address: %s", addr)
-		}
+		addr, err := DeriveAddress(t.Context(), setupKMS(t), "mer_derive", encryptedSeed, "ethereum-mainnet", 0)
+		require.NoError(t, err)
+		require.Len(t, addr, 42)
+		require.Equal(t, "0x", addr[:2])
 	})
 
 	t.Run("solana returns base58", func(t *testing.T) {
-		addr, err := DeriveAddress(t.Context(), kms, "mer_derive", ciphertext, "solana-mainnet", 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(addr) < 32 || len(addr) > 44 {
-			t.Errorf("invalid Solana address: %s", addr)
-		}
+		addr, err := DeriveAddress(t.Context(), setupKMS(t), "mer_derive", encryptedSeed, "solana-mainnet", 0)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, len(addr), 32)
+		require.LessOrEqual(t, len(addr), 44)
 	})
 
 	t.Run("all evm networks derive the same address for same seed and index", func(t *testing.T) {
@@ -213,21 +165,23 @@ func TestDeriveAddress(t *testing.T) {
 			if info.ChainType != "evm" {
 				continue
 			}
-			addr, err := DeriveAddress(t.Context(), kms, "mer_derive", ciphertext, id, 0)
-			if err != nil {
-				t.Fatalf("network %s: %v", id, err)
-			}
+			kms := mocks.NewMockKMS(t)
+			kms.EXPECT().Decrypt(mock.Anything, "kassi-merchant-mer_derive", encryptedSeed).
+				Return(fixedSeed, nil)
+
+			addr, err := DeriveAddress(t.Context(), kms, "mer_derive", encryptedSeed, id, 0)
+			require.NoError(t, err, "network %s", id)
 			if first == "" {
 				first = addr
-			} else if addr != first {
-				t.Errorf("network %s derived %s, expected %s", id, addr, first)
+			} else {
+				require.Equal(t, first, addr, "network %s derived different address", id)
 			}
 		}
 	})
 
 	t.Run("unknown network returns error", func(t *testing.T) {
-		if _, err := DeriveAddress(t.Context(), kms, "mer_derive", ciphertext, "fake-network", 0); err == nil {
-			t.Error("expected error for unknown network")
-		}
+		kms := mocks.NewMockKMS(t)
+		_, err := DeriveAddress(t.Context(), kms, "mer_derive", encryptedSeed, "fake-network", 0)
+		require.Error(t, err)
 	})
 }
