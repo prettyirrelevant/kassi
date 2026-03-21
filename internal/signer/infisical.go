@@ -2,12 +2,18 @@ package signer
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/imroc/req/v3"
 )
+
+type infisicalKey struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
 
 type InfisicalKMS struct {
 	clientID     string
@@ -18,6 +24,9 @@ type InfisicalKMS struct {
 	mu          sync.RWMutex
 	accessToken string
 	expiresAt   time.Time
+
+	keysMu sync.RWMutex
+	keys   map[string]string // name -> keyId
 }
 
 func NewInfisicalKMS(clientID, clientSecret, projectID string) *InfisicalKMS {
@@ -25,6 +34,7 @@ func NewInfisicalKMS(clientID, clientSecret, projectID string) *InfisicalKMS {
 		clientID:     clientID,
 		clientSecret: clientSecret,
 		projectID:    projectID,
+		keys:         make(map[string]string),
 		client: req.C().
 			SetBaseURL("https://app.infisical.com/api").
 			SetTimeout(10 * time.Second).
@@ -84,10 +94,50 @@ func (k *InfisicalKMS) authedRequest(ctx context.Context) (*req.Request, error) 
 		SetBearerAuthToken(token), nil
 }
 
+func (k *InfisicalKMS) resolveKeyID(ctx context.Context, name string) (string, error) {
+	k.keysMu.RLock()
+	if id, ok := k.keys[name]; ok {
+		k.keysMu.RUnlock()
+		return id, nil
+	}
+	k.keysMu.RUnlock()
+
+	r, err := k.authedRequest(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	var result struct {
+		Key infisicalKey `json:"key"`
+	}
+
+	resp, err := r.
+		SetPathParam("keyName", name).
+		SetQueryParam("projectId", k.projectID).
+		SetSuccessResult(&result).
+		Get("/v1/kms/keys/key-name/{keyName}")
+	if err != nil {
+		return "", fmt.Errorf("resolving KMS key %s: %w", name, err)
+	}
+	if !resp.IsSuccessState() {
+		return "", fmt.Errorf("infisical get key failed (status %d): %s", resp.StatusCode, resp.String())
+	}
+
+	k.keysMu.Lock()
+	k.keys[name] = result.Key.ID
+	k.keysMu.Unlock()
+
+	return result.Key.ID, nil
+}
+
 func (k *InfisicalKMS) CreateKey(ctx context.Context, name string) error {
 	r, err := k.authedRequest(ctx)
 	if err != nil {
 		return err
+	}
+
+	var result struct {
+		Key infisicalKey `json:"key"`
 	}
 
 	resp, err := r.
@@ -96,6 +146,7 @@ func (k *InfisicalKMS) CreateKey(ctx context.Context, name string) error {
 			"name":                name,
 			"encryptionAlgorithm": "aes-256-gcm",
 		}).
+		SetSuccessResult(&result).
 		Post("/v1/kms/keys")
 	if err != nil {
 		return fmt.Errorf("creating KMS key: %w", err)
@@ -104,10 +155,19 @@ func (k *InfisicalKMS) CreateKey(ctx context.Context, name string) error {
 		return fmt.Errorf("infisical create key failed (status %d): %s", resp.StatusCode, resp.String())
 	}
 
+	k.keysMu.Lock()
+	k.keys[name] = result.Key.ID
+	k.keysMu.Unlock()
+
 	return nil
 }
 
 func (k *InfisicalKMS) Encrypt(ctx context.Context, name string, plaintext []byte) (string, error) {
+	keyID, err := k.resolveKeyID(ctx, name)
+	if err != nil {
+		return "", err
+	}
+
 	r, err := k.authedRequest(ctx)
 	if err != nil {
 		return "", err
@@ -118,10 +178,12 @@ func (k *InfisicalKMS) Encrypt(ctx context.Context, name string, plaintext []byt
 	}
 
 	resp, err := r.
-		SetPathParam("name", name).
-		SetBodyJsonMarshal(map[string]any{"plaintext": plaintext}).
+		SetPathParam("keyId", keyID).
+		SetBodyJsonMarshal(map[string]string{
+			"plaintext": base64.StdEncoding.EncodeToString(plaintext),
+		}).
 		SetSuccessResult(&result).
-		Post("/v1/kms/keys/{name}/encrypt")
+		Post("/v1/kms/keys/{keyId}/encrypt")
 	if err != nil {
 		return "", fmt.Errorf("encrypting via KMS: %w", err)
 	}
@@ -133,20 +195,25 @@ func (k *InfisicalKMS) Encrypt(ctx context.Context, name string, plaintext []byt
 }
 
 func (k *InfisicalKMS) Decrypt(ctx context.Context, name string, ciphertext string) ([]byte, error) {
+	keyID, err := k.resolveKeyID(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+
 	r, err := k.authedRequest(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var result struct {
-		Plaintext []byte `json:"plaintext"`
+		Plaintext string `json:"plaintext"`
 	}
 
 	resp, err := r.
-		SetPathParam("name", name).
+		SetPathParam("keyId", keyID).
 		SetBodyJsonMarshal(map[string]string{"ciphertext": ciphertext}).
 		SetSuccessResult(&result).
-		Post("/v1/kms/keys/{name}/decrypt")
+		Post("/v1/kms/keys/{keyId}/decrypt")
 	if err != nil {
 		return nil, fmt.Errorf("decrypting via KMS: %w", err)
 	}
@@ -154,5 +221,10 @@ func (k *InfisicalKMS) Decrypt(ctx context.Context, name string, ciphertext stri
 		return nil, fmt.Errorf("infisical decrypt failed (status %d): %s", resp.StatusCode, resp.String())
 	}
 
-	return result.Plaintext, nil
+	decoded, err := base64.StdEncoding.DecodeString(result.Plaintext)
+	if err != nil {
+		return nil, fmt.Errorf("decoding plaintext: %w", err)
+	}
+
+	return decoded, nil
 }
