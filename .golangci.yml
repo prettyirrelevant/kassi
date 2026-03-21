@@ -1,3 +1,5 @@
+version: "2"
+
 linters:
   enable:
     - errcheck
@@ -5,14 +7,12 @@ linters:
     - staticcheck
     - revive
     - gosec
-
-linters-settings:
-  revive:
-    rules:
-      - name: exported
-        disabled: true
-
-issues:
-  exclude-dirs:
-    - internal/docs
-    - internal/mocks
+  settings:
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+  exclusions:
+    paths:
+      - internal/docs
+      - internal/mocks

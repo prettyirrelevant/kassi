@@ -44,13 +44,13 @@ var serveCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("connecting to database: %w", err)
 		}
-		defer store.Close()
+		defer func() { _ = store.Close() }()
 
 		redis, err := cache.New(cfg.RedisURL)
 		if err != nil {
 			return fmt.Errorf("connecting to redis: %w", err)
 		}
-		defer redis.Close()
+		defer func() { _ = redis.Close() }()
 
 		kms := signer.NewInfisicalKMS(
 			cfg.InfisicalClientID,

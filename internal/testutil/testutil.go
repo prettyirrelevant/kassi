@@ -113,8 +113,8 @@ func Setup(m *testing.M, fixturesDir string) {
 
 	code := m.Run()
 
-	store.Close()
-	c.Close()
+	_ = store.Close()
+	_ = c.Close()
 	_ = pg.Terminate(ctx)
 	_ = rd.Terminate(ctx)
 

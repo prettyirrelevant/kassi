@@ -26,7 +26,7 @@ var migrateCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("connecting to database: %w", err)
 		}
-		defer store.Close()
+		defer func() { _ = store.Close() }()
 
 		if err := store.Migrate(cmd.Context()); err != nil {
 			return fmt.Errorf("running migrations: %w", err)
