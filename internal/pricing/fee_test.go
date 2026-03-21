@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/shopspring/decimal"
+	"github.com/stretchr/testify/require"
 )
 
 func d(v string) decimal.Decimal {
@@ -16,11 +17,11 @@ func TestCalculateFee(t *testing.T) {
 	rate := d("1")
 
 	tests := []struct {
-		name      string
-		amount    string
-		decimals  int
-		wantFee   string
-		wantNet   string
+		name     string
+		amount   string
+		decimals int
+		wantFee  string
+		wantNet  string
 	}{
 		{
 			name:     "small deposit pays percentage",
@@ -33,15 +34,15 @@ func TestCalculateFee(t *testing.T) {
 			name:     "large deposit hits fee cap",
 			amount:   "10000000000", // 10,000 USDC
 			decimals: 6,
-			wantFee:  "25000000",    // 25 USDC (capped)
-			wantNet:  "9975000000",  // 9,975 USDC
+			wantFee:  "25000000",   // 25 USDC (capped)
+			wantNet:  "9975000000", // 9,975 USDC
 		},
 		{
 			name:     "very large deposit still capped",
 			amount:   "1000000000000", // 1,000,000 USDC
 			decimals: 6,
-			wantFee:  "25000000",       // 25 USDC (capped)
-			wantNet:  "999975000000",   // 999,975 USDC
+			wantFee:  "25000000",     // 25 USDC (capped)
+			wantNet:  "999975000000", // 999,975 USDC
 		},
 		{
 			name:     "zero amount returns zero fee",
@@ -55,12 +56,8 @@ func TestCalculateFee(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := CalculateFee(d(tt.amount), config, rate, tt.decimals)
-			if !result.FeeAmount.Equal(d(tt.wantFee)) {
-				t.Errorf("fee: got %s, want %s", result.FeeAmount, tt.wantFee)
-			}
-			if !result.NetAmount.Equal(d(tt.wantNet)) {
-				t.Errorf("net: got %s, want %s", result.NetAmount, tt.wantNet)
-			}
+			require.True(t, result.FeeAmount.Equal(d(tt.wantFee)), "fee: got %s, want %s", result.FeeAmount, tt.wantFee)
+			require.True(t, result.NetAmount.Equal(d(tt.wantNet)), "net: got %s, want %s", result.NetAmount, tt.wantNet)
 		})
 	}
 }
@@ -68,12 +65,8 @@ func TestCalculateFee(t *testing.T) {
 func TestCalculateFee_ZeroBPS(t *testing.T) {
 	config := FeeConfig{BPS: d("0"), MaxCents: d("2500")}
 	result := CalculateFee(d("100000000"), config, d("1"), 6)
-	if !result.FeeAmount.IsZero() {
-		t.Errorf("expected zero fee with BPS=0, got %s", result.FeeAmount)
-	}
-	if !result.NetAmount.Equal(d("100000000")) {
-		t.Errorf("expected full amount as net, got %s", result.NetAmount)
-	}
+	require.True(t, result.FeeAmount.IsZero(), "expected zero fee with BPS=0, got %s", result.FeeAmount)
+	require.True(t, result.NetAmount.Equal(d("100000000")), "expected full amount as net, got %s", result.NetAmount)
 }
 
 func TestCalculateFee_NonUSDRate(t *testing.T) {
@@ -87,10 +80,7 @@ func TestCalculateFee_NonUSDRate(t *testing.T) {
 	// fee_pct = floor(1e18 * 50 / 10000) = 5e15 (0.005 ETH = ~$16.23)
 	// max_in_tokens = floor(2500 / 100 / 3245.50 * 1e18) = floor(7.703..e15) = 7703...
 	// fee = min(5e15, 7.7e15) = 5e15
-	expectedFee := d("5000000000000000")
-	if !result.FeeAmount.Equal(expectedFee) {
-		t.Errorf("fee: got %s, want %s", result.FeeAmount, expectedFee)
-	}
+	require.True(t, result.FeeAmount.Equal(d("5000000000000000")), "fee: got %s, want 5000000000000000", result.FeeAmount)
 }
 
 func FuzzCalculateFee(f *testing.F) {
@@ -115,19 +105,8 @@ func FuzzCalculateFee(f *testing.F) {
 
 		result := CalculateFee(amt, config, rate, decimals)
 
-		// fee + net == amount
-		if sum := result.FeeAmount.Add(result.NetAmount); !sum.Equal(amt) {
-			t.Errorf("fee(%s) + net(%s) = %s, want %s", result.FeeAmount, result.NetAmount, sum, amt)
-		}
-
-		// fee must be non-negative
-		if result.FeeAmount.IsNegative() {
-			t.Errorf("negative fee: %s", result.FeeAmount)
-		}
-
-		// fee must not exceed amount
-		if result.FeeAmount.GreaterThan(amt) {
-			t.Errorf("fee %s exceeds amount %s", result.FeeAmount, amt)
-		}
+		require.True(t, result.FeeAmount.Add(result.NetAmount).Equal(amt), "fee(%s) + net(%s) != amount(%s)", result.FeeAmount, result.NetAmount, amt)
+		require.False(t, result.FeeAmount.IsNegative(), "negative fee: %s", result.FeeAmount)
+		require.True(t, result.FeeAmount.LessThanOrEqual(amt), "fee %s exceeds amount %s", result.FeeAmount, amt)
 	})
 }
