@@ -58,3 +58,28 @@ jobs:
 
       - name: coverage summary
         run: go tool cover -func=coverage.out
+
+  codeql:
+    name: codeql
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    steps:
+      - name: checkout
+        uses: actions/checkout@v5
+
+      - name: setup go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: initialize codeql
+        uses: github/codeql-action/init@v3
+        with:
+          languages: go
+
+      - name: build
+        run: CGO_ENABLED=0 go build -o kassi ./cmd/kassi
+
+      - name: analyze
+        uses: github/codeql-action/analyze@v3
