@@ -35,7 +35,8 @@ type MerchantConfig struct {
 
 	ID            string    `bun:"id,pk"`
 	MerchantID    string    `bun:"merchant_id,notnull"`
-	APIKeyHash    *string   `bun:"api_key_hash"`
+	PublicKeyHash *string   `bun:"public_key_hash"`
+	SecretKeyHash *string   `bun:"secret_key_hash"`
 	EncryptedSeed *string   `bun:"encrypted_seed"`
 	WebhookSecret string    `bun:"webhook_secret,notnull"`
 	WebhookURL    *string   `bun:"webhook_url"`

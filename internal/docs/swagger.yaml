@@ -1,0 +1,191 @@
+definitions:
+  github_com_prettyirrelevant_kassi_internal_util.ApiError:
+    properties:
+      error:
+        $ref: '#/definitions/github_com_prettyirrelevant_kassi_internal_util.ErrorBody'
+    type: object
+  github_com_prettyirrelevant_kassi_internal_util.ApiSuccess:
+    properties:
+      data: {}
+    type: object
+  github_com_prettyirrelevant_kassi_internal_util.ErrorBody:
+    properties:
+      code:
+        type: string
+      details:
+        items:
+          $ref: '#/definitions/github_com_prettyirrelevant_kassi_internal_util.FieldError'
+        type: array
+      message:
+        type: string
+    type: object
+  github_com_prettyirrelevant_kassi_internal_util.FieldError:
+    properties:
+      code:
+        type: string
+      field:
+        type: string
+      message:
+        type: string
+    type: object
+  internal_server_handlers.linkRequest:
+    properties:
+      message:
+        type: string
+      signature:
+        type: string
+    type: object
+  internal_server_handlers.verifyRequest:
+    properties:
+      message:
+        type: string
+      signature:
+        type: string
+    type: object
+info:
+  contact: {}
+  description: wallets-as-a-service payment infrastructure API
+  title: kassi API
+  version: 0.1.0
+paths:
+  /auth/link:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: signed message and signature
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_server_handlers.linkRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_prettyirrelevant_kassi_internal_util.ApiSuccess'
+            - properties:
+                data:
+                  additionalProperties:
+                    type: string
+                  type: object
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_prettyirrelevant_kassi_internal_util.ApiError'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_prettyirrelevant_kassi_internal_util.ApiError'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/github_com_prettyirrelevant_kassi_internal_util.ApiError'
+      security:
+      - BearerAuth: []
+      summary: Link an additional wallet to the current merchant
+      tags:
+      - auth
+  /auth/nonce:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_prettyirrelevant_kassi_internal_util.ApiSuccess'
+            - properties:
+                data:
+                  additionalProperties:
+                    type: string
+                  type: object
+              type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_prettyirrelevant_kassi_internal_util.ApiError'
+      summary: Request a nonce for wallet signing
+      tags:
+      - auth
+  /auth/verify:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: signed message and signature
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_server_handlers.verifyRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_prettyirrelevant_kassi_internal_util.ApiSuccess'
+            - properties:
+                data:
+                  additionalProperties:
+                    type: string
+                  type: object
+              type: object
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_prettyirrelevant_kassi_internal_util.ApiSuccess'
+            - properties:
+                data:
+                  additionalProperties:
+                    type: string
+                  type: object
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_prettyirrelevant_kassi_internal_util.ApiError'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_prettyirrelevant_kassi_internal_util.ApiError'
+      summary: Authenticate with a signed wallet message
+      tags:
+      - auth
+  /health:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_prettyirrelevant_kassi_internal_util.ApiSuccess'
+            - properties:
+                data:
+                  additionalProperties:
+                    type: string
+                  type: object
+              type: object
+      summary: Liveness probe
+      tags:
+      - health
+securityDefinitions:
+  APIKeyAuth:
+    in: header
+    name: X-API-Key
+    type: apiKey
+  BearerAuth:
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

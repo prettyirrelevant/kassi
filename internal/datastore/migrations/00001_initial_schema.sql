@@ -20,13 +20,16 @@ CREATE TABLE merchants (
 CREATE TABLE merchant_configs (
     id              TEXT PRIMARY KEY,
     merchant_id     TEXT NOT NULL UNIQUE REFERENCES merchants(id),
-    api_key_hash    TEXT UNIQUE,
+    public_key_hash TEXT,
+    secret_key_hash TEXT,
     encrypted_seed  TEXT,
     webhook_secret  TEXT NOT NULL,
     webhook_url     TEXT,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE INDEX idx_merchant_configs_public_key ON merchant_configs(public_key_hash);
+CREATE INDEX idx_merchant_configs_secret_key ON merchant_configs(secret_key_hash);
 
 CREATE TABLE settlement_destinations (
     id              TEXT PRIMARY KEY,
