@@ -24,6 +24,7 @@ func NewLiveOracle() *LiveOracle {
 	return &LiveOracle{
 		client: req.C().
 			SetTimeout(10 * time.Second).
+			SetUserAgent("kassi").
 			OnAfterResponse(func(_ *req.Client, resp *req.Response) error {
 				if !resp.IsSuccessState() {
 					resp.Err = fmt.Errorf("status %s: %s", resp.Status, resp.String())

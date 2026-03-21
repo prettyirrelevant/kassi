@@ -1,23 +1,19 @@
 package signer
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"sync"
 	"time"
-)
 
-const infisicalBaseURL = "https://app.infisical.com/api"
+	"github.com/imroc/req/v3"
+)
 
 type InfisicalKMS struct {
 	clientID     string
 	clientSecret string
 	projectID    string
-	httpClient   *http.Client
+	client       *req.Client
 
 	mu          sync.RWMutex
 	accessToken string
@@ -29,7 +25,10 @@ func NewInfisicalKMS(clientID, clientSecret, projectID string) *InfisicalKMS {
 		clientID:     clientID,
 		clientSecret: clientSecret,
 		projectID:    projectID,
-		httpClient:   &http.Client{Timeout: 10 * time.Second},
+		client: req.C().
+			SetBaseURL("https://app.infisical.com/api").
+			SetTimeout(10 * time.Second).
+			SetUserAgent("kassi"),
 	}
 }
 
@@ -45,40 +44,28 @@ func (k *InfisicalKMS) getToken(ctx context.Context) (string, error) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 
-	// double-check after acquiring write lock
 	if k.accessToken != "" && time.Now().Before(k.expiresAt) {
 		return k.accessToken, nil
 	}
 
-	body, _ := json.Marshal(map[string]string{
-		"clientId":     k.clientID,
-		"clientSecret": k.clientSecret,
-	})
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, infisicalBaseURL+"/v1/auth/universal-auth/login", bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("creating auth request: %w", err)
+	var result struct {
+		AccessToken string `json:"accessToken"`
+		ExpiresIn   int64  `json:"expiresIn"`
 	}
-	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := k.httpClient.Do(req)
+	resp, err := k.client.R().
+		SetContext(ctx).
+		SetBodyJsonMarshal(map[string]string{
+			"clientId":     k.clientID,
+			"clientSecret": k.clientSecret,
+		}).
+		SetSuccessResult(&result).
+		Post("/v1/auth/universal-auth/login")
 	if err != nil {
 		return "", fmt.Errorf("authenticating with infisical: %w", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("infisical auth failed (status %d): %s", resp.StatusCode, respBody)
-	}
-
-	var result struct {
-		AccessToken       string `json:"accessToken"`
-		ExpiresIn         int64  `json:"expiresIn"`
-		AccessTokenMaxTTL int64  `json:"accessTokenMaxTTL"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("decoding auth response: %w", err)
+	if !resp.IsSuccessState() {
+		return "", fmt.Errorf("infisical auth failed (status %d): %s", resp.StatusCode, resp.String())
 	}
 
 	k.accessToken = result.AccessToken
@@ -87,56 +74,41 @@ func (k *InfisicalKMS) getToken(ctx context.Context) (string, error) {
 	return k.accessToken, nil
 }
 
-func (k *InfisicalKMS) doRequest(ctx context.Context, method, path string, reqBody any) ([]byte, error) {
+func (k *InfisicalKMS) authedRequest(ctx context.Context) (*req.Request, error) {
 	token, err := k.getToken(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	var bodyReader io.Reader
-	if reqBody != nil {
-		b, _ := json.Marshal(reqBody)
-		bodyReader = bytes.NewReader(b)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, infisicalBaseURL+path, bodyReader)
-	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := k.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("executing request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading response: %w", err)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("infisical API error (status %d): %s", resp.StatusCode, respBody)
-	}
-
-	return respBody, nil
+	return k.client.R().
+		SetContext(ctx).
+		SetBearerAuthToken(token), nil
 }
 
 func (k *InfisicalKMS) CreateKey(ctx context.Context, name string) error {
-	_, err := k.doRequest(ctx, http.MethodPost, "/v1/kms/keys", map[string]string{
-		"projectId":        k.projectID,
-		"name":             name,
-		"encryptionAlgorithm": "aes-256-gcm",
-	})
-	return err
+	r, err := k.authedRequest(ctx)
+	if err != nil {
+		return err
+	}
+
+	resp, err := r.
+		SetBodyJsonMarshal(map[string]string{
+			"projectId":           k.projectID,
+			"name":                name,
+			"encryptionAlgorithm": "aes-256-gcm",
+		}).
+		Post("/v1/kms/keys")
+	if err != nil {
+		return fmt.Errorf("creating KMS key: %w", err)
+	}
+	if !resp.IsSuccessState() {
+		return fmt.Errorf("infisical create key failed (status %d): %s", resp.StatusCode, resp.String())
+	}
+
+	return nil
 }
 
 func (k *InfisicalKMS) Encrypt(ctx context.Context, name string, plaintext []byte) (string, error) {
-	respBody, err := k.doRequest(ctx, http.MethodPost, "/v1/kms/keys/"+name+"/encrypt", map[string]any{
-		"plaintext": plaintext,
-	})
+	r, err := k.authedRequest(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -144,17 +116,24 @@ func (k *InfisicalKMS) Encrypt(ctx context.Context, name string, plaintext []byt
 	var result struct {
 		Ciphertext string `json:"ciphertext"`
 	}
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return "", fmt.Errorf("decoding encrypt response: %w", err)
+
+	resp, err := r.
+		SetPathParam("name", name).
+		SetBodyJsonMarshal(map[string]any{"plaintext": plaintext}).
+		SetSuccessResult(&result).
+		Post("/v1/kms/keys/{name}/encrypt")
+	if err != nil {
+		return "", fmt.Errorf("encrypting via KMS: %w", err)
+	}
+	if !resp.IsSuccessState() {
+		return "", fmt.Errorf("infisical encrypt failed (status %d): %s", resp.StatusCode, resp.String())
 	}
 
 	return result.Ciphertext, nil
 }
 
 func (k *InfisicalKMS) Decrypt(ctx context.Context, name string, ciphertext string) ([]byte, error) {
-	respBody, err := k.doRequest(ctx, http.MethodPost, "/v1/kms/keys/"+name+"/decrypt", map[string]string{
-		"ciphertext": ciphertext,
-	})
+	r, err := k.authedRequest(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -162,8 +141,17 @@ func (k *InfisicalKMS) Decrypt(ctx context.Context, name string, ciphertext stri
 	var result struct {
 		Plaintext []byte `json:"plaintext"`
 	}
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return nil, fmt.Errorf("decoding decrypt response: %w", err)
+
+	resp, err := r.
+		SetPathParam("name", name).
+		SetBodyJsonMarshal(map[string]string{"ciphertext": ciphertext}).
+		SetSuccessResult(&result).
+		Post("/v1/kms/keys/{name}/decrypt")
+	if err != nil {
+		return nil, fmt.Errorf("decrypting via KMS: %w", err)
+	}
+	if !resp.IsSuccessState() {
+		return nil, fmt.Errorf("infisical decrypt failed (status %d): %s", resp.StatusCode, resp.String())
 	}
 
 	return result.Plaintext, nil
