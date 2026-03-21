@@ -3,21 +3,21 @@ package main
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/labstack/echo/v5"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
 	_ "github.com/prettyirrelevant/kassi/internal/docs"
 
+	"github.com/prettyirrelevant/kassi/internal/api"
 	"github.com/prettyirrelevant/kassi/internal/cache"
 	"github.com/prettyirrelevant/kassi/internal/config"
 	"github.com/prettyirrelevant/kassi/internal/datastore"
 	"github.com/prettyirrelevant/kassi/internal/pricing"
-	"github.com/prettyirrelevant/kassi/internal/api"
 	"github.com/prettyirrelevant/kassi/internal/signer"
 )
 
@@ -67,30 +67,17 @@ var serveCmd = &cobra.Command{
 			logger,
 		)
 
-		httpServer := &http.Server{
-			Addr:              ":" + cfg.Port,
-			Handler:           srv.Routes(),
-			ReadHeaderTimeout: 10 * time.Second,
-		}
-
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 
-		go func() {
-			logger.Info("server starting", zap.String("port", cfg.Port))
-			if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				logger.Fatal("server failed", zap.Error(err))
-			}
-		}()
+		logger.Info("server starting", zap.String("port", cfg.Port))
 
-		<-ctx.Done()
-		logger.Info("shutting down")
-
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-
-		if err := httpServer.Shutdown(shutdownCtx); err != nil {
-			return fmt.Errorf("server shutdown: %w", err)
+		sc := echo.StartConfig{
+			Address:         ":" + cfg.Port,
+			GracefulTimeout: 30 * time.Second,
+		}
+		if err := sc.Start(ctx, srv.Echo()); err != nil {
+			return fmt.Errorf("server error: %w", err)
 		}
 
 		logger.Info("shutdown complete")

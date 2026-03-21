@@ -1,11 +1,12 @@
 package handler
 
 import (
-	"encoding/json"
-	"errors"
 	"net/http"
 
 	validation "github.com/go-ozzo/ozzo-validation/v4"
+	"github.com/labstack/echo/v5"
+
+	"github.com/prettyirrelevant/kassi/internal/datastore"
 )
 
 type ApiSuccess struct {
@@ -46,43 +47,17 @@ type AppError struct {
 	Details []FieldError
 }
 
-func (e *AppError) Error() string { return e.Message }
+func (e *AppError) Error() string      { return e.Message }
+func (e *AppError) StatusCode() int    { return e.Status }
 
 var (
 	ErrNotFound          = &AppError{Status: http.StatusNotFound, Code: "resource_not_found", Message: "resource not found"}
-	ErrRouteNotFound     = &AppError{Status: http.StatusNotFound, Code: "route_not_found", Message: "no route matched"}
 	ErrUnauthorized      = &AppError{Status: http.StatusUnauthorized, Code: "authentication_required", Message: "authentication required"}
 	ErrForbidden         = &AppError{Status: http.StatusForbidden, Code: "forbidden", Message: "access denied"}
 	ErrInvalidSignature  = &AppError{Status: http.StatusUnauthorized, Code: "invalid_signature", Message: "wallet signature verification failed"}
 	ErrRateLimitExceeded = &AppError{Status: http.StatusTooManyRequests, Code: "rate_limit_exceeded", Message: "too many requests"}
 	ErrInternal          = &AppError{Status: http.StatusInternalServerError, Code: "internal_error", Message: "an unexpected error occurred"}
 )
-
-type HandlerFunc func(w http.ResponseWriter, r *http.Request) error
-
-func Wrap(fn HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if err := fn(w, r); err != nil {
-			var appErr *AppError
-			if errors.As(err, &appErr) {
-				WriteJSON(w, appErr.Status, ApiError{
-					Error: ErrorBody{
-						Code:    appErr.Code,
-						Message: appErr.Message,
-						Details: appErr.Details,
-					},
-				})
-				return
-			}
-			WriteJSON(w, http.StatusInternalServerError, ApiError{
-				Error: ErrorBody{
-					Code:    "internal_error",
-					Message: "an unexpected error occurred",
-				},
-			})
-		}
-	}
-}
 
 func ValidationError(err error) *AppError {
 	var details []FieldError
@@ -103,8 +78,7 @@ func ValidationError(err error) *AppError {
 	}
 }
 
-func WriteJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+func MerchantFromCtx(c *echo.Context) *datastore.Merchant {
+	m, _ := (*c).Get("merchant").(*datastore.Merchant)
+	return m
 }

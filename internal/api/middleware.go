@@ -1,178 +1,141 @@
 package api
 
 import (
-	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/labstack/echo/v5"
 	"go.uber.org/zap"
 
 	"github.com/prettyirrelevant/kassi/internal/api/handler"
-	"github.com/prettyirrelevant/kassi/internal/datastore"
 	"github.com/prettyirrelevant/kassi/internal/helpers"
 )
 
-type responseWriter struct {
-	http.ResponseWriter
-	status      int
-	wroteHeader bool
-}
-
-func (rw *responseWriter) WriteHeader(code int) {
-	if !rw.wroteHeader {
-		rw.status = code
-		rw.wroteHeader = true
-	}
-	rw.ResponseWriter.WriteHeader(code)
-}
-
-func (rw *responseWriter) Write(b []byte) (int, error) {
-	if !rw.wroteHeader {
-		rw.wroteHeader = true
-	}
-	return rw.ResponseWriter.Write(b)
-}
-
-func (s *Server) wideEventLog(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func (s *Server) wideEventLog(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c *echo.Context) error {
 		start := time.Now()
-		fields := map[string]any{
-			"method": r.Method,
-			"path":   r.URL.Path,
-		}
-		ctx := context.WithValue(r.Context(), handler.CtxWideEvent, fields)
 
-		rw := &responseWriter{ResponseWriter: w, status: http.StatusOK}
-		next.ServeHTTP(rw, r.WithContext(ctx))
+		err := next(c)
 
-		fields["status_code"] = rw.status
-		fields["duration_ms"] = time.Since(start).Milliseconds()
-
-		zapFields := make([]zap.Field, 0, len(fields))
-		for k, v := range fields {
-			zapFields = append(zapFields, zap.Any(k, v))
+		status := http.StatusOK
+		if err != nil {
+			var sc echo.HTTPStatusCoder
+			if errors.As(err, &sc) {
+				status = sc.StatusCode()
+			} else {
+				status = http.StatusInternalServerError
+			}
+		} else if rw, unwrapErr := echo.UnwrapResponse(c.Response()); unwrapErr == nil {
+			status = rw.Status
 		}
 
-		if rw.status >= 500 {
-			s.logger.Error("request", zapFields...)
+		fields := []zap.Field{
+			zap.String("method", c.Request().Method),
+			zap.String("path", c.Request().URL.Path),
+			zap.Int("status_code", status),
+			zap.Int64("duration_ms", time.Since(start).Milliseconds()),
+			zap.String("request_id", c.Response().Header().Get(echo.HeaderXRequestID)),
+		}
+
+		if merchant := handler.MerchantFromCtx(c); merchant != nil {
+			fields = append(fields, zap.String("merchant_id", merchant.ID))
+		}
+
+		if err != nil {
+			fields = append(fields, zap.Error(err))
+			s.logger.Error("request", fields...)
+		} else if status >= http.StatusInternalServerError {
+			s.logger.Error("request", fields...)
 		} else {
-			s.logger.Info("request", zapFields...)
+			s.logger.Info("request", fields...)
 		}
-	})
+
+		return err
+	}
 }
 
-func (s *Server) requireSession(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		header := r.Header.Get("Authorization")
+func (s *Server) requireSession(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		header := c.Request().Header.Get("Authorization")
 		if !strings.HasPrefix(header, "Bearer ") {
-			writeUnauthorized(w)
-			return
+			return handler.ErrUnauthorized
 		}
 
 		claims, err := s.parseJWT(strings.TrimPrefix(header, "Bearer "))
 		if err != nil {
-			writeUnauthorized(w)
-			return
+			return handler.ErrUnauthorized
 		}
 
 		merchantID, _ := claims["merchant_id"].(string)
 		if merchantID == "" {
-			writeUnauthorized(w)
-			return
+			return handler.ErrUnauthorized
 		}
 
-		merchant, err := s.store.FindMerchantByID(r.Context(), merchantID)
+		merchant, err := s.store.FindMerchantByID(c.Request().Context(), merchantID)
 		if err != nil {
-			writeUnauthorized(w)
-			return
+			return handler.ErrUnauthorized
 		}
 
-		s.setMerchant(w, r, next, merchant)
-	})
+		c.Set("merchant", merchant)
+		return next(c)
+	}
 }
 
-//nolint:unused // wired when merchant/deposit/payment routes are added
-func (s *Server) requireSecretKey(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		key := r.Header.Get("X-API-Key")
+func (s *Server) requireSecretKey(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		key := c.Request().Header.Get("X-API-Key")
 		if key == "" {
-			writeUnauthorized(w)
-			return
+			return handler.ErrUnauthorized
 		}
 
-		merchant, err := s.store.FindMerchantBySecretKeyHash(r.Context(), helpers.HashAPIKey(key))
+		merchant, err := s.store.FindMerchantBySecretKeyHash(
+			c.Request().Context(),
+			helpers.HashAPIKey(key),
+		)
 		if err != nil {
-			writeUnauthorized(w)
-			return
+			return handler.ErrUnauthorized
 		}
 
-		s.setMerchant(w, r, next, merchant)
-	})
+		c.Set("merchant", merchant)
+		return next(c)
+	}
 }
 
 //nolint:unused // wired when read-only routes are added
-func (s *Server) requirePublicKey(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		key := r.Header.Get("X-API-Key")
+func (s *Server) requirePublicKey(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		key := c.Request().Header.Get("X-API-Key")
 		if key == "" {
-			writeUnauthorized(w)
-			return
+			return handler.ErrUnauthorized
 		}
 
-		merchant, err := s.store.FindMerchantByPublicKeyHash(r.Context(), helpers.HashAPIKey(key))
+		merchant, err := s.store.FindMerchantByPublicKeyHash(
+			c.Request().Context(),
+			helpers.HashAPIKey(key),
+		)
 		if err != nil {
-			writeUnauthorized(w)
-			return
+			return handler.ErrUnauthorized
 		}
 
-		s.setMerchant(w, r, next, merchant)
-	})
+		c.Set("merchant", merchant)
+		return next(c)
+	}
 }
 
-//nolint:unused // wired when routes need multiple auth strategies
-func (s *Server) requireAny(middlewares ...func(http.Handler) http.Handler) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func (s *Server) requireAny(middlewares ...echo.MiddlewareFunc) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
 			for _, mw := range middlewares {
-				passed := false
-				probe := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					passed = true
-					next.ServeHTTP(w, r)
-				}))
-
-				rw := &noopResponseWriter{}
-				probe.ServeHTTP(rw, r)
-				if passed {
-					return
+				if err := mw(next)(c); err == nil {
+					return nil
 				}
 			}
-
-			writeUnauthorized(w)
-		})
+			return handler.ErrUnauthorized
+		}
 	}
-}
-
-//nolint:unused // used by requireAny
-type noopResponseWriter struct{}
-
-//nolint:unused // implements http.ResponseWriter for requireAny
-func (noopResponseWriter) Header() http.Header { return http.Header{} }
-
-//nolint:unused // implements http.ResponseWriter for requireAny
-func (noopResponseWriter) Write(b []byte) (int, error) { return len(b), nil }
-
-//nolint:unused // implements http.ResponseWriter for requireAny
-func (noopResponseWriter) WriteHeader(int) {}
-
-func (s *Server) setMerchant(w http.ResponseWriter, r *http.Request, next http.Handler, merchant *datastore.Merchant) {
-	if fields := handler.WideEventFields(r.Context()); fields != nil {
-		fields["merchant_id"] = merchant.ID
-	}
-
-	ctx := context.WithValue(r.Context(), handler.CtxMerchant, merchant)
-	next.ServeHTTP(w, r.WithContext(ctx))
 }
 
 func (s *Server) parseJWT(tokenStr string) (jwt.MapClaims, error) {
@@ -191,10 +154,3 @@ func (s *Server) parseJWT(tokenStr string) (jwt.MapClaims, error) {
 	}
 	return claims, nil
 }
-
-func writeUnauthorized(w http.ResponseWriter) {
-	handler.WriteJSON(w, handler.ErrUnauthorized.Status, handler.ApiError{
-		Error: handler.ErrorBody{Code: handler.ErrUnauthorized.Code, Message: handler.ErrUnauthorized.Message},
-	})
-}
-

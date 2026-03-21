@@ -22,25 +22,29 @@ func (s *Store) FindMerchantByID(ctx context.Context, id string) (*Merchant, err
 }
 
 func (s *Store) FindMerchantByPublicKeyHash(ctx context.Context, hash string) (*Merchant, error) {
-	cfg := new(MerchantConfig)
+	merchant := new(Merchant)
 	if err := s.DB.NewSelect().
-		Model(cfg).
-		Where("public_key_hash = ?", hash).
+		Model(merchant).
+		Relation("Config").
+		Join("JOIN merchant_configs AS mc ON mc.merchant_id = merchant.id").
+		Where("mc.public_key_hash = ?", hash).
 		Scan(ctx); err != nil {
 		return nil, fmt.Errorf("finding merchant by public key hash: %w", err)
 	}
-	return s.FindMerchantByID(ctx, cfg.MerchantID)
+	return merchant, nil
 }
 
 func (s *Store) FindMerchantBySecretKeyHash(ctx context.Context, hash string) (*Merchant, error) {
-	cfg := new(MerchantConfig)
+	merchant := new(Merchant)
 	if err := s.DB.NewSelect().
-		Model(cfg).
-		Where("secret_key_hash = ?", hash).
+		Model(merchant).
+		Relation("Config").
+		Join("JOIN merchant_configs AS mc ON mc.merchant_id = merchant.id").
+		Where("mc.secret_key_hash = ?", hash).
 		Scan(ctx); err != nil {
 		return nil, fmt.Errorf("finding merchant by secret key hash: %w", err)
 	}
-	return s.FindMerchantByID(ctx, cfg.MerchantID)
+	return merchant, nil
 }
 
 func (s *Store) FindSignerByAddress(ctx context.Context, address string) (*Signer, error) {
@@ -87,6 +91,75 @@ func (s *Store) CreateMerchantWithConfig(ctx context.Context, address, signerTyp
 
 	merchant.Config = cfg
 	return merchant, nil
+}
+
+func (s *Store) UpdateMerchant(ctx context.Context, merchantID string, name *string, webhookURL *string) (*Merchant, error) {
+	if err := s.DB.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		_, err := tx.NewUpdate().
+			Model((*Merchant)(nil)).
+			Set("name = ?", name).
+			Set("updated_at = now()").
+			Where("id = ?", merchantID).
+			Exec(ctx)
+		if err != nil {
+			return fmt.Errorf("updating merchant: %w", err)
+		}
+
+		_, err = tx.NewUpdate().
+			Model((*MerchantConfig)(nil)).
+			Set("webhook_url = ?", webhookURL).
+			Set("updated_at = now()").
+			Where("merchant_id = ?", merchantID).
+			Exec(ctx)
+		if err != nil {
+			return fmt.Errorf("updating merchant config: %w", err)
+		}
+
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("updating merchant %s: %w", merchantID, err)
+	}
+
+	return s.FindMerchantByID(ctx, merchantID)
+}
+
+func (s *Store) UpdateSecretKeyHash(ctx context.Context, merchantID, hash string) error {
+	_, err := s.DB.NewUpdate().
+		Model((*MerchantConfig)(nil)).
+		Set("secret_key_hash = ?", hash).
+		Set("updated_at = now()").
+		Where("merchant_id = ?", merchantID).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("updating secret key hash for merchant %s: %w", merchantID, err)
+	}
+	return nil
+}
+
+func (s *Store) UpdatePublicKeyHash(ctx context.Context, merchantID, hash string) error {
+	_, err := s.DB.NewUpdate().
+		Model((*MerchantConfig)(nil)).
+		Set("public_key_hash = ?", hash).
+		Set("updated_at = now()").
+		Where("merchant_id = ?", merchantID).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("updating public key hash for merchant %s: %w", merchantID, err)
+	}
+	return nil
+}
+
+func (s *Store) UpdateWebhookSecret(ctx context.Context, merchantID, secret string) error {
+	_, err := s.DB.NewUpdate().
+		Model((*MerchantConfig)(nil)).
+		Set("webhook_secret = ?", secret).
+		Set("updated_at = now()").
+		Where("merchant_id = ?", merchantID).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("updating webhook secret for merchant %s: %w", merchantID, err)
+	}
+	return nil
 }
 
 func (s *Store) CreateSigner(ctx context.Context, merchantID, address, signerType string) (*Signer, error) {

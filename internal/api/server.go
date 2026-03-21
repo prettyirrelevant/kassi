@@ -1,12 +1,11 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
-	"github.com/go-chi/cors"
-	httpSwagger "github.com/swaggo/http-swagger/v2"
+	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v5/middleware"
 	"go.uber.org/zap"
 
 	"github.com/prettyirrelevant/kassi/internal/api/handler"
@@ -24,6 +23,7 @@ type Server struct {
 	config *config.Config
 	cache  *cache.Cache
 	logger *zap.Logger
+	echo   *echo.Echo
 }
 
 func New(
@@ -34,41 +34,41 @@ func New(
 	cache *cache.Cache,
 	logger *zap.Logger,
 ) *Server {
-	return &Server{
+	s := &Server{
 		store:  store,
 		kms:    kms,
 		oracle: oracle,
 		config: cfg,
 		cache:  cache,
 		logger: logger,
+		echo:   echo.New(),
 	}
+
+	s.echo.HTTPErrorHandler = s.errorHandler
+	s.setupRoutes()
+
+	return s
 }
 
-func (s *Server) Routes() http.Handler {
-	r := chi.NewRouter()
+func (s *Server) Echo() *echo.Echo {
+	return s.echo
+}
 
-	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
-	r.Use(s.wideEventLog)
-	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"},
-		AllowedMethods:   []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-API-Key"},
+func (s *Server) setupRoutes() {
+	e := s.echo
+
+	e.Use(middleware.RequestID())
+	e.Use(middleware.Recover())
+	e.Use(s.wideEventLog)
+	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
+		AllowOrigins:     []string{"*"},
+		AllowMethods:     []string{http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodDelete, http.MethodOptions},
+		AllowHeaders:     []string{"Accept", "Authorization", "Content-Type", "X-API-Key"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
 
-	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
-		handler.WriteJSON(w, handler.ErrRouteNotFound.Status, handler.ApiError{
-			Error: handler.ErrorBody{
-				Code:    handler.ErrRouteNotFound.Code,
-				Message: handler.ErrRouteNotFound.Message,
-			},
-		})
-	})
-
-	r.Get("/health", handler.Wrap(s.Health))
-	r.Get("/docs/*", httpSwagger.Handler())
+	e.GET("/health", s.health)
 
 	auth := &handler.AuthHandler{
 		Store:  s.store,
@@ -76,20 +76,62 @@ func (s *Server) Routes() http.Handler {
 		Config: s.config,
 	}
 
-	r.Get("/auth/nonce", handler.Wrap(auth.GetNonce))
-	r.Post("/auth/verify", handler.Wrap(auth.Verify))
-	r.With(s.requireSession).Post("/auth/link", handler.Wrap(auth.Link))
+	e.GET("/auth/nonce", auth.GetNonce)
+	e.POST("/auth/verify", auth.Verify)
 
-	return r
+	sessionOnly := e.Group("", s.requireSession)
+	sessionOnly.POST("/auth/link", auth.Link)
+
+	merchant := &handler.MerchantHandler{
+		Store:  s.store,
+		Config: s.config,
+	}
+
+	sessionOnly.PATCH("/merchants/me", merchant.UpdateMe)
+	sessionOnly.POST("/merchants/me/rotate-key", merchant.RotateKey)
+	sessionOnly.POST("/merchants/me/rotate-webhook-secret", merchant.RotateWebhookSecret)
+
+	sessionOrSecretKey := e.Group("", s.requireAny(s.requireSession, s.requireSecretKey))
+	sessionOrSecretKey.GET("/merchants/me", merchant.GetMe)
 }
 
-// Health godoc
-// @Summary Liveness probe
-// @Tags health
-// @Produce json
-// @Success 200 {object} handler.ApiSuccess{data=map[string]string}
-// @Router /health [get]
-func (s *Server) Health(w http.ResponseWriter, r *http.Request) error {
-	handler.WriteJSON(w, http.StatusOK, handler.ApiSuccess{Data: map[string]string{"status": "healthy"}})
-	return nil
+func (s *Server) health(c *echo.Context) error {
+	return c.JSON(http.StatusOK, handler.ApiSuccess{Data: map[string]string{"status": "healthy"}})
+}
+
+func (s *Server) errorHandler(c *echo.Context, err error) {
+	if resp, err := echo.UnwrapResponse(c.Response()); err == nil && resp.Committed {
+		return
+	}
+
+	var appErr *handler.AppError
+	if errors.As(err, &appErr) {
+		_ = c.JSON(appErr.Status, handler.ApiError{
+			Error: handler.ErrorBody{
+				Code:    appErr.Code,
+				Message: appErr.Message,
+				Details: appErr.Details,
+			},
+		})
+		return
+	}
+
+	var he *echo.HTTPError
+	if errors.As(err, &he) {
+		_ = c.JSON(he.Code, handler.ApiError{
+			Error: handler.ErrorBody{
+				Code:    "http_error",
+				Message: http.StatusText(he.Code),
+			},
+		})
+		return
+	}
+
+	s.logger.Error("unhandled error", zap.Error(err))
+	_ = c.JSON(http.StatusInternalServerError, handler.ApiError{
+		Error: handler.ErrorBody{
+			Code:    "internal_error",
+			Message: "an unexpected error occurred",
+		},
+	})
 }

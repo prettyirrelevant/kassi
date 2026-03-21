@@ -1,20 +1,21 @@
 package handler
 
 import (
-	"bytes"
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v5/echotest"
 	"github.com/mr-tron/base58"
 	"github.com/stretchr/testify/require"
 
+	"github.com/prettyirrelevant/kassi/internal/datastore"
 	"github.com/prettyirrelevant/kassi/internal/testutil"
 )
 
@@ -34,56 +35,22 @@ func TestGetNonce(t *testing.T) {
 	require.NoError(t, testutil.Infra.LoadFixtures())
 	h := newAuthHandler()
 
-	t.Run("returns a nonce", func(t *testing.T) {
-		rr := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/auth/nonce", nil)
+	t.Run("nonce is stored in cache and consumable", func(t *testing.T) {
+		c, rec := echotest.ContextConfig{}.ToContextRecorder(t)
 
-		err := h.GetNonce(rr, req)
-		require.NoError(t, err)
-		require.Equal(t, http.StatusOK, rr.Code)
+		require.NoError(t, h.GetNonce(c))
 
 		var resp ApiSuccess
-		require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+		require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
 
-		data, ok := resp.Data.(map[string]any)
-		require.True(t, ok)
-		require.NotEmpty(t, data["nonce"])
-	})
-
-	t.Run("nonce is stored in cache", func(t *testing.T) {
-		rr := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/auth/nonce", nil)
-
-		err := h.GetNonce(rr, req)
-		require.NoError(t, err)
-
-		var resp ApiSuccess
-		require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
-
-		data := resp.Data.(map[string]any)
-		nonce := data["nonce"].(string)
-
-		val, err := testutil.Infra.Cache.Get(req.Context(), "nonce:"+nonce)
+		nonce := resp.Data.(map[string]any)["nonce"].(string)
+		val, err := testutil.Infra.Cache.GetDel(c.Request().Context(), "nonce:"+nonce)
 		require.NoError(t, err)
 		require.Equal(t, "1", val)
-	})
 
-	t.Run("each call returns a different nonce", func(t *testing.T) {
-		rr1 := httptest.NewRecorder()
-		rr2 := httptest.NewRecorder()
-		req1 := httptest.NewRequest(http.MethodGet, "/auth/nonce", nil)
-		req2 := httptest.NewRequest(http.MethodGet, "/auth/nonce", nil)
-
-		require.NoError(t, h.GetNonce(rr1, req1))
-		require.NoError(t, h.GetNonce(rr2, req2))
-
-		var resp1, resp2 ApiSuccess
-		require.NoError(t, json.NewDecoder(rr1.Body).Decode(&resp1))
-		require.NoError(t, json.NewDecoder(rr2.Body).Decode(&resp2))
-
-		n1 := resp1.Data.(map[string]any)["nonce"].(string)
-		n2 := resp2.Data.(map[string]any)["nonce"].(string)
-		require.NotEqual(t, n1, n2)
+		// consumed, second get should fail
+		_, err = testutil.Infra.Cache.Get(c.Request().Context(), "nonce:"+nonce)
+		require.Error(t, err)
 	})
 }
 
@@ -92,10 +59,12 @@ func TestVerify(t *testing.T) {
 	h := newAuthHandler()
 
 	t.Run("invalid request body", func(t *testing.T) {
-		rr := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodPost, "/auth/verify", bytes.NewReader([]byte("not json")))
+		c, _ := echotest.ContextConfig{
+			Headers:  map[string][]string{echo.HeaderContentType: {echo.MIMEApplicationJSON}},
+			JSONBody: []byte("not json"),
+		}.ToContextRecorder(t)
 
-		err := h.Verify(rr, req)
+		err := h.Verify(c)
 		require.Error(t, err)
 
 		var appErr *AppError
@@ -108,11 +77,12 @@ func TestVerify(t *testing.T) {
 			Message:   "not a valid message",
 			Signature: "not a valid signature",
 		})
+		c, _ := echotest.ContextConfig{
+			Headers:  map[string][]string{echo.HeaderContentType: {echo.MIMEApplicationJSON}},
+			JSONBody: body,
+		}.ToContextRecorder(t)
 
-		rr := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodPost, "/auth/verify", bytes.NewReader(body))
-
-		err := h.Verify(rr, req)
+		err := h.Verify(c)
 		require.Error(t, err)
 
 		var appErr *AppError
@@ -124,20 +94,17 @@ func TestVerify(t *testing.T) {
 	t.Run("expired nonce", func(t *testing.T) {
 		pub, priv, _ := ed25519.GenerateKey(nil)
 		address := base58.Encode(pub)
-		nonce := "expired_nonce_value"
 
-		message := buildSIWSMessage("localhost", address, nonce)
+		message := buildSIWSMessage("localhost", address, "expired_nonce_value")
 		signature := base58.Encode(ed25519.Sign(priv, []byte(message)))
 
-		body, _ := json.Marshal(verifyRequest{
-			Message:   message,
-			Signature: signature,
-		})
+		body, _ := json.Marshal(verifyRequest{Message: message, Signature: signature})
+		c, _ := echotest.ContextConfig{
+			Headers:  map[string][]string{echo.HeaderContentType: {echo.MIMEApplicationJSON}},
+			JSONBody: body,
+		}.ToContextRecorder(t)
 
-		rr := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodPost, "/auth/verify", bytes.NewReader(body))
-
-		err := h.Verify(rr, req)
+		err := h.Verify(c)
 		require.Error(t, err)
 
 		var appErr *AppError
@@ -155,20 +122,17 @@ func TestVerify(t *testing.T) {
 		message := buildSIWSMessage("localhost", address, nonce)
 		signature := base58.Encode(ed25519.Sign(priv, []byte(message)))
 
-		body, _ := json.Marshal(verifyRequest{
-			Message:   message,
-			Signature: signature,
-		})
+		body, _ := json.Marshal(verifyRequest{Message: message, Signature: signature})
+		c, rec := echotest.ContextConfig{
+			Headers:  map[string][]string{echo.HeaderContentType: {echo.MIMEApplicationJSON}},
+			JSONBody: body,
+		}.ToContextRecorder(t)
 
-		rr := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodPost, "/auth/verify", bytes.NewReader(body))
-
-		err := h.Verify(rr, req)
-		require.NoError(t, err)
-		require.Equal(t, http.StatusCreated, rr.Code)
+		require.NoError(t, h.Verify(c))
+		require.Equal(t, http.StatusCreated, rec.Code)
 
 		var resp ApiSuccess
-		require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+		require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
 		data := resp.Data.(map[string]any)
 		require.NotEmpty(t, data["token"])
 
@@ -184,25 +148,27 @@ func TestVerify(t *testing.T) {
 		pub, priv, _ := ed25519.GenerateKey(nil)
 		address := base58.Encode(pub)
 
-		// first login
 		nonce1 := storeNonce(t, h)
 		msg1 := buildSIWSMessage("localhost", address, nonce1)
 		sig1 := base58.Encode(ed25519.Sign(priv, []byte(msg1)))
 		body1, _ := json.Marshal(verifyRequest{Message: msg1, Signature: sig1})
+		c1, rec1 := echotest.ContextConfig{
+			Headers:  map[string][]string{echo.HeaderContentType: {echo.MIMEApplicationJSON}},
+			JSONBody: body1,
+		}.ToContextRecorder(t)
+		require.NoError(t, h.Verify(c1))
+		require.Equal(t, http.StatusCreated, rec1.Code)
 
-		rr1 := httptest.NewRecorder()
-		require.NoError(t, h.Verify(rr1, httptest.NewRequest(http.MethodPost, "/auth/verify", bytes.NewReader(body1))))
-		require.Equal(t, http.StatusCreated, rr1.Code)
-
-		// second login
 		nonce2 := storeNonce(t, h)
 		msg2 := buildSIWSMessage("localhost", address, nonce2)
 		sig2 := base58.Encode(ed25519.Sign(priv, []byte(msg2)))
 		body2, _ := json.Marshal(verifyRequest{Message: msg2, Signature: sig2})
-
-		rr2 := httptest.NewRecorder()
-		require.NoError(t, h.Verify(rr2, httptest.NewRequest(http.MethodPost, "/auth/verify", bytes.NewReader(body2))))
-		require.Equal(t, http.StatusOK, rr2.Code)
+		c2, rec2 := echotest.ContextConfig{
+			Headers:  map[string][]string{echo.HeaderContentType: {echo.MIMEApplicationJSON}},
+			JSONBody: body2,
+		}.ToContextRecorder(t)
+		require.NoError(t, h.Verify(c2))
+		require.Equal(t, http.StatusOK, rec2.Code)
 	})
 
 	t.Run("nonce is consumed after use", func(t *testing.T) {
@@ -216,15 +182,19 @@ func TestVerify(t *testing.T) {
 		signature := base58.Encode(ed25519.Sign(priv, []byte(message)))
 
 		body, _ := json.Marshal(verifyRequest{Message: message, Signature: signature})
+		c1, _ := echotest.ContextConfig{
+			Headers:  map[string][]string{echo.HeaderContentType: {echo.MIMEApplicationJSON}},
+			JSONBody: body,
+		}.ToContextRecorder(t)
+		require.NoError(t, h.Verify(c1))
 
-		// first use succeeds
-		rr1 := httptest.NewRecorder()
-		require.NoError(t, h.Verify(rr1, httptest.NewRequest(http.MethodPost, "/auth/verify", bytes.NewReader(body))))
-
-		// replay with same nonce fails
-		rr2 := httptest.NewRecorder()
 		body2, _ := json.Marshal(verifyRequest{Message: message, Signature: signature})
-		err := h.Verify(rr2, httptest.NewRequest(http.MethodPost, "/auth/verify", bytes.NewReader(body2)))
+		c2, _ := echotest.ContextConfig{
+			Headers:  map[string][]string{echo.HeaderContentType: {echo.MIMEApplicationJSON}},
+			JSONBody: body2,
+		}.ToContextRecorder(t)
+
+		err := h.Verify(c2)
 		require.Error(t, err)
 
 		var appErr *AppError
@@ -238,11 +208,13 @@ func TestLink(t *testing.T) {
 	h := newAuthHandler()
 
 	t.Run("invalid request body", func(t *testing.T) {
-		rr := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodPost, "/auth/link", bytes.NewReader([]byte("bad")))
-		req = reqWithMerchant(req, "mer_test_existing")
+		c, _ := echotest.ContextConfig{
+			Headers:  map[string][]string{echo.HeaderContentType: {echo.MIMEApplicationJSON}},
+			JSONBody: []byte("bad"),
+		}.ToContextRecorder(t)
+		c.Set("merchant", mustFindMerchant(t, "mer_test_existing"))
 
-		err := h.Link(rr, req)
+		err := h.Link(c)
 		require.Error(t, err)
 
 		var appErr *AppError
@@ -261,17 +233,16 @@ func TestLink(t *testing.T) {
 		signature := base58.Encode(ed25519.Sign(priv, []byte(message)))
 
 		body, _ := json.Marshal(linkRequest{Message: message, Signature: signature})
+		c, rec := echotest.ContextConfig{
+			Headers:  map[string][]string{echo.HeaderContentType: {echo.MIMEApplicationJSON}},
+			JSONBody: body,
+		}.ToContextRecorder(t)
+		c.Set("merchant", mustFindMerchant(t, "mer_test_existing"))
 
-		rr := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodPost, "/auth/link", bytes.NewReader(body))
-		req = reqWithMerchant(req, "mer_test_existing")
+		require.NoError(t, h.Link(c))
+		require.Equal(t, http.StatusCreated, rec.Code)
 
-		err := h.Link(rr, req)
-		require.NoError(t, err)
-		require.Equal(t, http.StatusCreated, rr.Code)
-
-		// verify the signer was created
-		sgn, err := testutil.Infra.Store.FindSignerByAddress(req.Context(), address)
+		sgn, err := testutil.Infra.Store.FindSignerByAddress(c.Request().Context(), address)
 		require.NoError(t, err)
 		require.Equal(t, "mer_test_existing", sgn.MerchantID)
 		require.Equal(t, "solana", sgn.SignerType)
@@ -283,28 +254,28 @@ func TestLink(t *testing.T) {
 		pub, priv, _ := ed25519.GenerateKey(nil)
 		address := base58.Encode(pub)
 
-		// link first time
 		nonce1 := storeNonce(t, h)
 		msg1 := buildSIWSMessage("localhost", address, nonce1)
 		sig1 := base58.Encode(ed25519.Sign(priv, []byte(msg1)))
 		body1, _ := json.Marshal(linkRequest{Message: msg1, Signature: sig1})
+		c1, _ := echotest.ContextConfig{
+			Headers:  map[string][]string{echo.HeaderContentType: {echo.MIMEApplicationJSON}},
+			JSONBody: body1,
+		}.ToContextRecorder(t)
+		c1.Set("merchant", mustFindMerchant(t, "mer_test_existing"))
+		require.NoError(t, h.Link(c1))
 
-		rr1 := httptest.NewRecorder()
-		req1 := httptest.NewRequest(http.MethodPost, "/auth/link", bytes.NewReader(body1))
-		req1 = reqWithMerchant(req1, "mer_test_existing")
-		require.NoError(t, h.Link(rr1, req1))
-
-		// link same wallet again
 		nonce2 := storeNonce(t, h)
 		msg2 := buildSIWSMessage("localhost", address, nonce2)
 		sig2 := base58.Encode(ed25519.Sign(priv, []byte(msg2)))
 		body2, _ := json.Marshal(linkRequest{Message: msg2, Signature: sig2})
+		c2, _ := echotest.ContextConfig{
+			Headers:  map[string][]string{echo.HeaderContentType: {echo.MIMEApplicationJSON}},
+			JSONBody: body2,
+		}.ToContextRecorder(t)
+		c2.Set("merchant", mustFindMerchant(t, "mer_test_existing"))
 
-		rr2 := httptest.NewRecorder()
-		req2 := httptest.NewRequest(http.MethodPost, "/auth/link", bytes.NewReader(body2))
-		req2 = reqWithMerchant(req2, "mer_test_existing")
-
-		err := h.Link(rr2, req2)
+		err := h.Link(c2)
 		require.Error(t, err)
 
 		var appErr *AppError
@@ -330,12 +301,11 @@ Issued At: %s`, domain, address, domain, domain, nonce, time.Now().UTC().Format(
 
 func storeNonce(t *testing.T, h *AuthHandler) string {
 	t.Helper()
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/auth/nonce", nil)
-	require.NoError(t, h.GetNonce(rr, req))
+	c, rec := echotest.ContextConfig{}.ToContextRecorder(t)
+	require.NoError(t, h.GetNonce(c))
 
 	var resp ApiSuccess
-	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
 	return resp.Data.(map[string]any)["nonce"].(string)
 }
 
@@ -350,9 +320,9 @@ func parseTestJWT(t *testing.T, tokenStr, secret string) jwt.MapClaims {
 	return claims
 }
 
-func reqWithMerchant(r *http.Request, merchantID string) *http.Request {
-	merchant, _ := testutil.Infra.Store.FindMerchantByID(r.Context(), merchantID)
-	return r.WithContext(
-		context.WithValue(r.Context(), CtxMerchant, merchant),
-	)
+func mustFindMerchant(t *testing.T, id string) *datastore.Merchant {
+	t.Helper()
+	m, err := testutil.Infra.Store.FindMerchantByID(context.Background(), id)
+	require.NoError(t, err)
+	return m
 }

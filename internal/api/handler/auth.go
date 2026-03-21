@@ -3,7 +3,6 @@ package handler
 import (
 	"crypto/ed25519"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/labstack/echo/v5"
 	"github.com/mr-tron/base58"
 	"github.com/rs/xid"
 	siwe "github.com/spruceid/siwe-go"
@@ -42,18 +42,17 @@ type linkRequest struct {
 // @Summary Request a nonce for wallet signing
 // @Tags auth
 // @Produce json
-// @Success 200 {object} handler.ApiSuccess{data=map[string]string}
-// @Failure 500 {object} handler.ApiError
+// @Success 200 {object} ApiSuccess{data=map[string]string}
+// @Failure 500 {object} ApiError
 // @Router /auth/nonce [get]
-func (h *AuthHandler) GetNonce(w http.ResponseWriter, r *http.Request) error {
+func (h *AuthHandler) GetNonce(c *echo.Context) error {
 	nonce := xid.New().String()
 
-	if err := h.Cache.Set(r.Context(), "nonce:"+nonce, "1", nonceTTL); err != nil {
+	if err := h.Cache.Set(c.Request().Context(), "nonce:"+nonce, "1", nonceTTL); err != nil {
 		return fmt.Errorf("storing nonce: %w", err)
 	}
 
-	WriteJSON(w, http.StatusOK, ApiSuccess{Data: map[string]string{"nonce": nonce}})
-	return nil
+	return c.JSON(http.StatusOK, ApiSuccess{Data: map[string]string{"nonce": nonce}})
 }
 
 // Verify godoc
@@ -62,14 +61,14 @@ func (h *AuthHandler) GetNonce(w http.ResponseWriter, r *http.Request) error {
 // @Accept json
 // @Produce json
 // @Param body body verifyRequest true "signed message and signature"
-// @Success 200 {object} handler.ApiSuccess{data=map[string]string}
-// @Success 201 {object} handler.ApiSuccess{data=map[string]string}
-// @Failure 400 {object} handler.ApiError
-// @Failure 401 {object} handler.ApiError
+// @Success 200 {object} ApiSuccess{data=map[string]string}
+// @Success 201 {object} ApiSuccess{data=map[string]string}
+// @Failure 400 {object} ApiError
+// @Failure 401 {object} ApiError
 // @Router /auth/verify [post]
-func (h *AuthHandler) Verify(w http.ResponseWriter, r *http.Request) error {
+func (h *AuthHandler) Verify(c *echo.Context) error {
 	var req verifyRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := c.Bind(&req); err != nil {
 		return &AppError{
 			Status:  http.StatusBadRequest,
 			Code:    "invalid_request",
@@ -82,7 +81,7 @@ func (h *AuthHandler) Verify(w http.ResponseWriter, r *http.Request) error {
 		return ErrInvalidSignature
 	}
 
-	if _, err := h.Cache.GetDel(r.Context(), "nonce:"+nonce); err != nil {
+	if _, err := h.Cache.GetDel(c.Request().Context(), "nonce:"+nonce); err != nil {
 		return &AppError{
 			Status:  http.StatusUnauthorized,
 			Code:    "invalid_nonce",
@@ -90,13 +89,14 @@ func (h *AuthHandler) Verify(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 
-	sgn, err := h.Store.FindSignerByAddress(r.Context(), address)
+	ctx := c.Request().Context()
+	sgn, err := h.Store.FindSignerByAddress(ctx, address)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("finding signer: %w", err)
 		}
 
-		merchant, err := h.Store.CreateMerchantWithConfig(r.Context(), address, signerType)
+		merchant, err := h.Store.CreateMerchantWithConfig(ctx, address, signerType)
 		if err != nil {
 			return fmt.Errorf("creating merchant: %w", err)
 		}
@@ -106,8 +106,7 @@ func (h *AuthHandler) Verify(w http.ResponseWriter, r *http.Request) error {
 			return fmt.Errorf("issuing JWT: %w", err)
 		}
 
-		WriteJSON(w, http.StatusCreated, ApiSuccess{Data: map[string]string{"token": token}})
-		return nil
+		return c.JSON(http.StatusCreated, ApiSuccess{Data: map[string]string{"token": token}})
 	}
 
 	token, err := h.issueJWT(sgn.MerchantID, address, signerType)
@@ -115,8 +114,7 @@ func (h *AuthHandler) Verify(w http.ResponseWriter, r *http.Request) error {
 		return fmt.Errorf("issuing JWT: %w", err)
 	}
 
-	WriteJSON(w, http.StatusOK, ApiSuccess{Data: map[string]string{"token": token}})
-	return nil
+	return c.JSON(http.StatusOK, ApiSuccess{Data: map[string]string{"token": token}})
 }
 
 // Link godoc
@@ -125,17 +123,17 @@ func (h *AuthHandler) Verify(w http.ResponseWriter, r *http.Request) error {
 // @Accept json
 // @Produce json
 // @Param body body linkRequest true "signed message and signature"
-// @Success 201 {object} handler.ApiSuccess{data=map[string]string}
-// @Failure 400 {object} handler.ApiError
-// @Failure 401 {object} handler.ApiError
-// @Failure 409 {object} handler.ApiError
+// @Success 201 {object} ApiSuccess{data=map[string]string}
+// @Failure 400 {object} ApiError
+// @Failure 401 {object} ApiError
+// @Failure 409 {object} ApiError
 // @Security BearerAuth
 // @Router /auth/link [post]
-func (h *AuthHandler) Link(w http.ResponseWriter, r *http.Request) error {
-	merchant := MerchantFromCtx(r.Context())
+func (h *AuthHandler) Link(c *echo.Context) error {
+	merchant := MerchantFromCtx(c)
 
 	var req linkRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := c.Bind(&req); err != nil {
 		return &AppError{
 			Status:  http.StatusBadRequest,
 			Code:    "invalid_request",
@@ -148,7 +146,8 @@ func (h *AuthHandler) Link(w http.ResponseWriter, r *http.Request) error {
 		return ErrInvalidSignature
 	}
 
-	if _, err := h.Cache.GetDel(r.Context(), "nonce:"+nonce); err != nil {
+	ctx := c.Request().Context()
+	if _, err := h.Cache.GetDel(ctx, "nonce:"+nonce); err != nil {
 		return &AppError{
 			Status:  http.StatusUnauthorized,
 			Code:    "invalid_nonce",
@@ -156,7 +155,7 @@ func (h *AuthHandler) Link(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 
-	if _, err := h.Store.FindSignerByAddress(r.Context(), address); err == nil {
+	if _, err := h.Store.FindSignerByAddress(ctx, address); err == nil {
 		return &AppError{
 			Status:  http.StatusConflict,
 			Code:    "signer_already_linked",
@@ -164,12 +163,11 @@ func (h *AuthHandler) Link(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 
-	if _, err := h.Store.CreateSigner(r.Context(), merchant.ID, address, signerType); err != nil {
+	if _, err := h.Store.CreateSigner(ctx, merchant.ID, address, signerType); err != nil {
 		return fmt.Errorf("creating signer: %w", err)
 	}
 
-	WriteJSON(w, http.StatusCreated, ApiSuccess{Data: map[string]string{"status": "linked"}})
-	return nil
+	return c.JSON(http.StatusCreated, ApiSuccess{Data: map[string]string{"status": "linked"}})
 }
 
 func (h *AuthHandler) issueJWT(merchantID, signerAddress, signerType string) (string, error) {
