@@ -35,7 +35,7 @@ func CalculateFee(amount decimal.Decimal, config FeeConfig, exchangeRate decimal
 	maxInTokens := config.MaxCents.
 		Div(centsDiv).
 		Div(exchangeRate).
-		Mul(decimal.New(1, int32(decimals))).
+		Mul(decimal.New(1, int32(decimals))). //nolint:gosec
 		Floor()
 
 	fee := decimal.Min(feePct, maxInTokens)

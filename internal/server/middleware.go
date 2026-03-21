@@ -95,6 +95,7 @@ func (s *Server) requireSession(next http.Handler) http.Handler {
 	})
 }
 
+//nolint:unused // wired when merchant/deposit/payment routes are added
 func (s *Server) requireSecretKey(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key := r.Header.Get("X-API-Key")
@@ -113,6 +114,7 @@ func (s *Server) requireSecretKey(next http.Handler) http.Handler {
 	})
 }
 
+//nolint:unused // wired when read-only routes are added
 func (s *Server) requirePublicKey(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key := r.Header.Get("X-API-Key")
@@ -131,6 +133,7 @@ func (s *Server) requirePublicKey(next http.Handler) http.Handler {
 	})
 }
 
+//nolint:unused // wired when routes need multiple auth strategies
 func (s *Server) requireAny(middlewares ...func(http.Handler) http.Handler) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -153,11 +156,17 @@ func (s *Server) requireAny(middlewares ...func(http.Handler) http.Handler) func
 	}
 }
 
+//nolint:unused // used by requireAny
 type noopResponseWriter struct{}
 
-func (noopResponseWriter) Header() http.Header         { return http.Header{} }
+//nolint:unused // implements http.ResponseWriter for requireAny
+func (noopResponseWriter) Header() http.Header { return http.Header{} }
+
+//nolint:unused // implements http.ResponseWriter for requireAny
 func (noopResponseWriter) Write(b []byte) (int, error) { return len(b), nil }
-func (noopResponseWriter) WriteHeader(int)             {}
+
+//nolint:unused // implements http.ResponseWriter for requireAny
+func (noopResponseWriter) WriteHeader(int) {}
 
 func (s *Server) setMerchant(w http.ResponseWriter, r *http.Request, next http.Handler, merchant *datastore.Merchant) {
 	if fields := handlers.WideEventFields(r.Context()); fields != nil {
@@ -191,6 +200,7 @@ func writeUnauthorized(w http.ResponseWriter) {
 	})
 }
 
+//nolint:unused // used by requireSecretKey and requirePublicKey
 func hashAPIKey(key string) string {
 	h := sha256.Sum256([]byte(key))
 	return hex.EncodeToString(h[:])

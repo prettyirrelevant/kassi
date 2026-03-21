@@ -1,0 +1,5 @@
+- id: "sig_test_existing"
+  merchant_id: "mer_test_existing"
+  address: "0x742d35Cc6634C0532925a3b844Bc9e7595f2bD18"
+  signer_type: "evm"
+  linked_at: "2026-03-01T00:00:00Z"

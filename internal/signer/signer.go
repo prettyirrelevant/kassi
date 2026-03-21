@@ -111,7 +111,7 @@ func SignEVMTransaction(ctx context.Context, kms KMS, merchantID, encryptedSeed,
 		return nil, fmt.Errorf("extracting EC private key: %w", err)
 	}
 
-	return signEVMTx(privKey.ToECDSA(), big.NewInt(int64(net.ChainID)), tx)
+	return signEVMTx(privKey.ToECDSA(), big.NewInt(int64(net.ChainID)), tx) //nolint:gosec
 }
 
 // SignSolanaTransaction decrypts the merchant seed, derives the ed25519 keypair

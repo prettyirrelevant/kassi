@@ -7,6 +7,6 @@ import (
 
 func RandomString(prefix string, bytes int) string {
 	b := make([]byte, bytes)
-	rand.Read(b)
+	_, _ = rand.Read(b)
 	return prefix + hex.EncodeToString(b)
 }

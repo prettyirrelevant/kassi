@@ -38,7 +38,7 @@ var serveCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("creating logger: %w", err)
 		}
-		defer logger.Sync()
+		defer func() { _ = logger.Sync() }()
 
 		store, err := datastore.NewStore(cfg.DatabaseURL)
 		if err != nil {
@@ -68,8 +68,9 @@ var serveCmd = &cobra.Command{
 		)
 
 		httpServer := &http.Server{
-			Addr:    ":" + cfg.Port,
-			Handler: srv.Routes(),
+			Addr:              ":" + cfg.Port,
+			Handler:           srv.Routes(),
+			ReadHeaderTimeout: 10 * time.Second,
 		}
 
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
