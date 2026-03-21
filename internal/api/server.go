@@ -1,4 +1,4 @@
-package server
+package api
 
 import (
 	"net/http"
@@ -9,13 +9,12 @@ import (
 	httpSwagger "github.com/swaggo/http-swagger/v2"
 	"go.uber.org/zap"
 
+	"github.com/prettyirrelevant/kassi/internal/api/handler"
 	"github.com/prettyirrelevant/kassi/internal/cache"
 	"github.com/prettyirrelevant/kassi/internal/config"
 	"github.com/prettyirrelevant/kassi/internal/datastore"
 	"github.com/prettyirrelevant/kassi/internal/pricing"
-	"github.com/prettyirrelevant/kassi/internal/server/handlers"
 	"github.com/prettyirrelevant/kassi/internal/signer"
-	"github.com/prettyirrelevant/kassi/internal/util"
 )
 
 type Server struct {
@@ -60,26 +59,26 @@ func (s *Server) Routes() http.Handler {
 	}))
 
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
-		util.WriteJSON(w, util.ErrRouteNotFound.Status, util.ApiError{
-			Error: util.ErrorBody{
-				Code:    util.ErrRouteNotFound.Code,
-				Message: util.ErrRouteNotFound.Message,
+		handler.WriteJSON(w, handler.ErrRouteNotFound.Status, handler.ApiError{
+			Error: handler.ErrorBody{
+				Code:    handler.ErrRouteNotFound.Code,
+				Message: handler.ErrRouteNotFound.Message,
 			},
 		})
 	})
 
-	r.Get("/health", util.Wrap(s.Health))
+	r.Get("/health", handler.Wrap(s.Health))
 	r.Get("/docs/*", httpSwagger.Handler())
 
-	auth := &handlers.AuthHandler{
+	auth := &handler.AuthHandler{
 		Store:  s.store,
 		Cache:  s.cache,
 		Config: s.config,
 	}
 
-	r.Get("/auth/nonce", util.Wrap(auth.GetNonce))
-	r.Post("/auth/verify", util.Wrap(auth.Verify))
-	r.With(s.requireSession).Post("/auth/link", util.Wrap(auth.Link))
+	r.Get("/auth/nonce", handler.Wrap(auth.GetNonce))
+	r.Post("/auth/verify", handler.Wrap(auth.Verify))
+	r.With(s.requireSession).Post("/auth/link", handler.Wrap(auth.Link))
 
 	return r
 }
@@ -88,9 +87,9 @@ func (s *Server) Routes() http.Handler {
 // @Summary Liveness probe
 // @Tags health
 // @Produce json
-// @Success 200 {object} util.ApiSuccess{data=map[string]string}
+// @Success 200 {object} handler.ApiSuccess{data=map[string]string}
 // @Router /health [get]
 func (s *Server) Health(w http.ResponseWriter, r *http.Request) error {
-	util.WriteJSON(w, http.StatusOK, util.ApiSuccess{Data: map[string]string{"status": "healthy"}})
+	handler.WriteJSON(w, http.StatusOK, handler.ApiSuccess{Data: map[string]string{"status": "healthy"}})
 	return nil
 }

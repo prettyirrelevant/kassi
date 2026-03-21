@@ -39,7 +39,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_server_handlers.linkRequest"
+                            "$ref": "#/definitions/internal_api_handler.linkRequest"
                         }
                     }
                 ],
@@ -49,7 +49,7 @@ const docTemplate = `{
                         "schema": {
                             "allOf": [
                                 {
-                                    "$ref": "#/definitions/github_com_prettyirrelevant_kassi_internal_util.ApiSuccess"
+                                    "$ref": "#/definitions/github_com_prettyirrelevant_kassi_internal_api_handler.ApiSuccess"
                                 },
                                 {
                                     "type": "object",
@@ -68,19 +68,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/github_com_prettyirrelevant_kassi_internal_util.ApiError"
+                            "$ref": "#/definitions/github_com_prettyirrelevant_kassi_internal_api_handler.ApiError"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_prettyirrelevant_kassi_internal_util.ApiError"
+                            "$ref": "#/definitions/github_com_prettyirrelevant_kassi_internal_api_handler.ApiError"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/github_com_prettyirrelevant_kassi_internal_util.ApiError"
+                            "$ref": "#/definitions/github_com_prettyirrelevant_kassi_internal_api_handler.ApiError"
                         }
                     }
                 }
@@ -101,7 +101,7 @@ const docTemplate = `{
                         "schema": {
                             "allOf": [
                                 {
-                                    "$ref": "#/definitions/github_com_prettyirrelevant_kassi_internal_util.ApiSuccess"
+                                    "$ref": "#/definitions/github_com_prettyirrelevant_kassi_internal_api_handler.ApiSuccess"
                                 },
                                 {
                                     "type": "object",
@@ -120,7 +120,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_prettyirrelevant_kassi_internal_util.ApiError"
+                            "$ref": "#/definitions/github_com_prettyirrelevant_kassi_internal_api_handler.ApiError"
                         }
                     }
                 }
@@ -145,7 +145,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_server_handlers.verifyRequest"
+                            "$ref": "#/definitions/internal_api_handler.verifyRequest"
                         }
                     }
                 ],
@@ -155,7 +155,7 @@ const docTemplate = `{
                         "schema": {
                             "allOf": [
                                 {
-                                    "$ref": "#/definitions/github_com_prettyirrelevant_kassi_internal_util.ApiSuccess"
+                                    "$ref": "#/definitions/github_com_prettyirrelevant_kassi_internal_api_handler.ApiSuccess"
                                 },
                                 {
                                     "type": "object",
@@ -176,7 +176,7 @@ const docTemplate = `{
                         "schema": {
                             "allOf": [
                                 {
-                                    "$ref": "#/definitions/github_com_prettyirrelevant_kassi_internal_util.ApiSuccess"
+                                    "$ref": "#/definitions/github_com_prettyirrelevant_kassi_internal_api_handler.ApiSuccess"
                                 },
                                 {
                                     "type": "object",
@@ -195,13 +195,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/github_com_prettyirrelevant_kassi_internal_util.ApiError"
+                            "$ref": "#/definitions/github_com_prettyirrelevant_kassi_internal_api_handler.ApiError"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/github_com_prettyirrelevant_kassi_internal_util.ApiError"
+                            "$ref": "#/definitions/github_com_prettyirrelevant_kassi_internal_api_handler.ApiError"
                         }
                     }
                 }
@@ -222,7 +222,7 @@ const docTemplate = `{
                         "schema": {
                             "allOf": [
                                 {
-                                    "$ref": "#/definitions/github_com_prettyirrelevant_kassi_internal_util.ApiSuccess"
+                                    "$ref": "#/definitions/github_com_prettyirrelevant_kassi_internal_api_handler.ApiSuccess"
                                 },
                                 {
                                     "type": "object",
@@ -243,21 +243,21 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "github_com_prettyirrelevant_kassi_internal_util.ApiError": {
+        "github_com_prettyirrelevant_kassi_internal_api_handler.ApiError": {
             "type": "object",
             "properties": {
                 "error": {
-                    "$ref": "#/definitions/github_com_prettyirrelevant_kassi_internal_util.ErrorBody"
+                    "$ref": "#/definitions/github_com_prettyirrelevant_kassi_internal_api_handler.ErrorBody"
                 }
             }
         },
-        "github_com_prettyirrelevant_kassi_internal_util.ApiSuccess": {
+        "github_com_prettyirrelevant_kassi_internal_api_handler.ApiSuccess": {
             "type": "object",
             "properties": {
                 "data": {}
             }
         },
-        "github_com_prettyirrelevant_kassi_internal_util.ErrorBody": {
+        "github_com_prettyirrelevant_kassi_internal_api_handler.ErrorBody": {
             "type": "object",
             "properties": {
                 "code": {
@@ -266,7 +266,7 @@ const docTemplate = `{
                 "details": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_prettyirrelevant_kassi_internal_util.FieldError"
+                        "$ref": "#/definitions/github_com_prettyirrelevant_kassi_internal_api_handler.FieldError"
                     }
                 },
                 "message": {
@@ -274,7 +274,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_prettyirrelevant_kassi_internal_util.FieldError": {
+        "github_com_prettyirrelevant_kassi_internal_api_handler.FieldError": {
             "type": "object",
             "properties": {
                 "code": {
@@ -288,7 +288,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_server_handlers.linkRequest": {
+        "internal_api_handler.linkRequest": {
             "type": "object",
             "properties": {
                 "message": {
@@ -299,7 +299,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_server_handlers.verifyRequest": {
+        "internal_api_handler.verifyRequest": {
             "type": "object",
             "properties": {
                 "message": {

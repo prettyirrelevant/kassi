@@ -15,7 +15,7 @@ type Config struct {
 	RedisURL    string        `koanf:"redis_url"`
 	Port        string        `koanf:"port"`
 	Deployment  string        `koanf:"deployment"`
-	JWTSecret   string        `koanf:"session_jwt_secret"`
+	JWTSecret   string        `koanf:"session_jwt_secret"` //nolint:gosec
 	JWTExpiry   time.Duration `koanf:"session_jwt_expiry"`
 
 	InfisicalClientID     string `koanf:"infisical_client_id"`

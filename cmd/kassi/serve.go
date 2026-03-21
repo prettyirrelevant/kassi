@@ -17,7 +17,7 @@ import (
 	"github.com/prettyirrelevant/kassi/internal/config"
 	"github.com/prettyirrelevant/kassi/internal/datastore"
 	"github.com/prettyirrelevant/kassi/internal/pricing"
-	"github.com/prettyirrelevant/kassi/internal/server"
+	"github.com/prettyirrelevant/kassi/internal/api"
 	"github.com/prettyirrelevant/kassi/internal/signer"
 )
 
@@ -58,7 +58,7 @@ var serveCmd = &cobra.Command{
 			cfg.InfisicalProjectID,
 		)
 
-		srv := server.New(
+		srv := api.New(
 			store,
 			kms,
 			pricing.NewLiveOracle(),

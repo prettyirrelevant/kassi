@@ -1,9 +1,7 @@
-package server
+package api
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"net/http"
 	"strings"
 	"time"
@@ -11,9 +9,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"go.uber.org/zap"
 
+	"github.com/prettyirrelevant/kassi/internal/api/handler"
 	"github.com/prettyirrelevant/kassi/internal/datastore"
-	"github.com/prettyirrelevant/kassi/internal/server/handlers"
-	"github.com/prettyirrelevant/kassi/internal/util"
+	"github.com/prettyirrelevant/kassi/internal/helpers"
 )
 
 type responseWriter struct {
@@ -44,7 +42,7 @@ func (s *Server) wideEventLog(next http.Handler) http.Handler {
 			"method": r.Method,
 			"path":   r.URL.Path,
 		}
-		ctx := context.WithValue(r.Context(), handlers.CtxWideEvent, fields)
+		ctx := context.WithValue(r.Context(), handler.CtxWideEvent, fields)
 
 		rw := &responseWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rw, r.WithContext(ctx))
@@ -104,7 +102,7 @@ func (s *Server) requireSecretKey(next http.Handler) http.Handler {
 			return
 		}
 
-		merchant, err := s.store.FindMerchantBySecretKeyHash(r.Context(), hashAPIKey(key))
+		merchant, err := s.store.FindMerchantBySecretKeyHash(r.Context(), helpers.HashAPIKey(key))
 		if err != nil {
 			writeUnauthorized(w)
 			return
@@ -123,7 +121,7 @@ func (s *Server) requirePublicKey(next http.Handler) http.Handler {
 			return
 		}
 
-		merchant, err := s.store.FindMerchantByPublicKeyHash(r.Context(), hashAPIKey(key))
+		merchant, err := s.store.FindMerchantByPublicKeyHash(r.Context(), helpers.HashAPIKey(key))
 		if err != nil {
 			writeUnauthorized(w)
 			return
@@ -169,11 +167,11 @@ func (noopResponseWriter) Write(b []byte) (int, error) { return len(b), nil }
 func (noopResponseWriter) WriteHeader(int) {}
 
 func (s *Server) setMerchant(w http.ResponseWriter, r *http.Request, next http.Handler, merchant *datastore.Merchant) {
-	if fields := handlers.WideEventFields(r.Context()); fields != nil {
+	if fields := handler.WideEventFields(r.Context()); fields != nil {
 		fields["merchant_id"] = merchant.ID
 	}
 
-	ctx := context.WithValue(r.Context(), handlers.CtxMerchant, merchant)
+	ctx := context.WithValue(r.Context(), handler.CtxMerchant, merchant)
 	next.ServeHTTP(w, r.WithContext(ctx))
 }
 
@@ -195,13 +193,8 @@ func (s *Server) parseJWT(tokenStr string) (jwt.MapClaims, error) {
 }
 
 func writeUnauthorized(w http.ResponseWriter) {
-	util.WriteJSON(w, util.ErrUnauthorized.Status, util.ApiError{
-		Error: util.ErrorBody{Code: util.ErrUnauthorized.Code, Message: util.ErrUnauthorized.Message},
+	handler.WriteJSON(w, handler.ErrUnauthorized.Status, handler.ApiError{
+		Error: handler.ErrorBody{Code: handler.ErrUnauthorized.Code, Message: handler.ErrUnauthorized.Message},
 	})
 }
 
-//nolint:unused // used by requireSecretKey and requirePublicKey
-func hashAPIKey(key string) string {
-	h := sha256.Sum256([]byte(key))
-	return hex.EncodeToString(h[:])
-}

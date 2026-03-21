@@ -1,4 +1,4 @@
-package handlers
+package handler
 
 import (
 	"bytes"
@@ -16,11 +16,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/prettyirrelevant/kassi/internal/testutil"
-	"github.com/prettyirrelevant/kassi/internal/util"
 )
 
 func TestMain(m *testing.M) {
-	testutil.Setup(m, "testdata/fixtures")
+	testutil.Setup(m, "../../testutil/fixtures")
 }
 
 func newAuthHandler() *AuthHandler {
@@ -43,7 +42,7 @@ func TestGetNonce(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, rr.Code)
 
-		var resp util.ApiSuccess
+		var resp ApiSuccess
 		require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
 
 		data, ok := resp.Data.(map[string]any)
@@ -58,7 +57,7 @@ func TestGetNonce(t *testing.T) {
 		err := h.GetNonce(rr, req)
 		require.NoError(t, err)
 
-		var resp util.ApiSuccess
+		var resp ApiSuccess
 		require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
 
 		data := resp.Data.(map[string]any)
@@ -78,7 +77,7 @@ func TestGetNonce(t *testing.T) {
 		require.NoError(t, h.GetNonce(rr1, req1))
 		require.NoError(t, h.GetNonce(rr2, req2))
 
-		var resp1, resp2 util.ApiSuccess
+		var resp1, resp2 ApiSuccess
 		require.NoError(t, json.NewDecoder(rr1.Body).Decode(&resp1))
 		require.NoError(t, json.NewDecoder(rr2.Body).Decode(&resp2))
 
@@ -99,7 +98,7 @@ func TestVerify(t *testing.T) {
 		err := h.Verify(rr, req)
 		require.Error(t, err)
 
-		var appErr *util.AppError
+		var appErr *AppError
 		require.ErrorAs(t, err, &appErr)
 		require.Equal(t, http.StatusBadRequest, appErr.Status)
 	})
@@ -116,7 +115,7 @@ func TestVerify(t *testing.T) {
 		err := h.Verify(rr, req)
 		require.Error(t, err)
 
-		var appErr *util.AppError
+		var appErr *AppError
 		require.ErrorAs(t, err, &appErr)
 		require.Equal(t, http.StatusUnauthorized, appErr.Status)
 		require.Equal(t, "invalid_signature", appErr.Code)
@@ -141,7 +140,7 @@ func TestVerify(t *testing.T) {
 		err := h.Verify(rr, req)
 		require.Error(t, err)
 
-		var appErr *util.AppError
+		var appErr *AppError
 		require.ErrorAs(t, err, &appErr)
 		require.Equal(t, "invalid_nonce", appErr.Code)
 	})
@@ -168,7 +167,7 @@ func TestVerify(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, http.StatusCreated, rr.Code)
 
-		var resp util.ApiSuccess
+		var resp ApiSuccess
 		require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
 		data := resp.Data.(map[string]any)
 		require.NotEmpty(t, data["token"])
@@ -228,7 +227,7 @@ func TestVerify(t *testing.T) {
 		err := h.Verify(rr2, httptest.NewRequest(http.MethodPost, "/auth/verify", bytes.NewReader(body2)))
 		require.Error(t, err)
 
-		var appErr *util.AppError
+		var appErr *AppError
 		require.ErrorAs(t, err, &appErr)
 		require.Equal(t, "invalid_nonce", appErr.Code)
 	})
@@ -246,7 +245,7 @@ func TestLink(t *testing.T) {
 		err := h.Link(rr, req)
 		require.Error(t, err)
 
-		var appErr *util.AppError
+		var appErr *AppError
 		require.ErrorAs(t, err, &appErr)
 		require.Equal(t, http.StatusBadRequest, appErr.Status)
 	})
@@ -308,7 +307,7 @@ func TestLink(t *testing.T) {
 		err := h.Link(rr2, req2)
 		require.Error(t, err)
 
-		var appErr *util.AppError
+		var appErr *AppError
 		require.ErrorAs(t, err, &appErr)
 		require.Equal(t, http.StatusConflict, appErr.Status)
 		require.Equal(t, "signer_already_linked", appErr.Code)
@@ -335,7 +334,7 @@ func storeNonce(t *testing.T, h *AuthHandler) string {
 	req := httptest.NewRequest(http.MethodGet, "/auth/nonce", nil)
 	require.NoError(t, h.GetNonce(rr, req))
 
-	var resp util.ApiSuccess
+	var resp ApiSuccess
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
 	return resp.Data.(map[string]any)["nonce"].(string)
 }

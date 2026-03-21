@@ -6,7 +6,7 @@ import (
 
 	"github.com/uptrace/bun"
 
-	"github.com/prettyirrelevant/kassi/internal/util"
+	"github.com/prettyirrelevant/kassi/internal/helpers"
 )
 
 func (s *Store) FindMerchantByID(ctx context.Context, id string) (*Merchant, error) {
@@ -60,7 +60,7 @@ func (s *Store) CreateMerchantWithConfig(ctx context.Context, address, signerTyp
 	cfg := &MerchantConfig{
 		ID:            NewMerchantConfigID(),
 		MerchantID:    merchant.ID,
-		WebhookSecret: util.RandomString("whsec_", 32),
+		WebhookSecret: helpers.RandomString("whsec_", 32),
 	}
 
 	sgn := &Signer{

@@ -49,7 +49,7 @@ func (k *InfisicalKMS) getToken(ctx context.Context) (string, error) {
 	}
 
 	var result struct {
-		AccessToken string `json:"accessToken"`
+		AccessToken string `json:"accessToken"` //nolint:gosec
 		ExpiresIn   int64  `json:"expiresIn"`
 	}
 
