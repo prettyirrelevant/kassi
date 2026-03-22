@@ -5,14 +5,16 @@ import (
 	"encoding/base64"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/imroc/req/v3"
+	"golang.org/x/sync/singleflight"
 )
 
-type infisicalKey struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+type cachedToken struct {
+	value     string
+	expiresAt time.Time
 }
 
 type InfisicalKMS struct {
@@ -20,98 +22,90 @@ type InfisicalKMS struct {
 	clientSecret string
 	projectID    string
 	client       *req.Client
-
-	mu          sync.RWMutex
-	accessToken string
-	expiresAt   time.Time
-
-	keysMu sync.RWMutex
-	keys   map[string]string // name -> keyId
+	token        atomic.Value   // *cachedToken
+	tokenFlight  singleflight.Group
+	keys         sync.Map       // name -> keyId (string)
 }
 
 func NewInfisicalKMS(clientID, clientSecret, projectID string) *InfisicalKMS {
-	return &InfisicalKMS{
+	kms := &InfisicalKMS{
 		clientID:     clientID,
 		clientSecret: clientSecret,
 		projectID:    projectID,
-		keys:         make(map[string]string),
-		client: req.C().
-			SetBaseURL("https://app.infisical.com/api").
-			SetTimeout(10 * time.Second).
-			SetUserAgent("kassi"),
 	}
+
+	kms.client = req.C().
+		SetBaseURL("https://app.infisical.com/api").
+		SetTimeout(10 * time.Second).
+		SetUserAgent("kassi").
+		OnBeforeRequest(kms.ensureAuth)
+
+	return kms
 }
 
-func (k *InfisicalKMS) getToken(ctx context.Context) (string, error) {
-	k.mu.RLock()
-	if k.accessToken != "" && time.Now().Before(k.expiresAt) {
-		token := k.accessToken
-		k.mu.RUnlock()
-		return token, nil
+func (k *InfisicalKMS) ensureAuth(_ *req.Client, r *req.Request) error {
+	if r.RawURL == "/v1/auth/universal-auth/login" {
+		return nil
 	}
-	k.mu.RUnlock()
 
-	k.mu.Lock()
-	defer k.mu.Unlock()
+	if v, ok := k.token.Load().(*cachedToken); ok && time.Now().Before(v.expiresAt) {
+		r.SetBearerAuthToken(v.value)
+		return nil
+	}
 
-	if k.accessToken != "" && time.Now().Before(k.expiresAt) {
-		return k.accessToken, nil
+	result, err, _ := k.tokenFlight.Do("token", func() (any, error) {
+		if v, ok := k.token.Load().(*cachedToken); ok && time.Now().Before(v.expiresAt) {
+			return v.value, nil
+		}
+
+		var authResp struct {
+			AccessToken string `json:"accessToken"` //nolint:gosec
+			ExpiresIn   int64  `json:"expiresIn"`
+		}
+
+		resp, err := k.client.R().
+			SetContext(r.Context()).
+			SetBodyJsonMarshal(map[string]string{
+				"clientId":     k.clientID,
+				"clientSecret": k.clientSecret,
+			}).
+			SetSuccessResult(&authResp).
+			Post("/v1/auth/universal-auth/login")
+		if err != nil {
+			return nil, fmt.Errorf("authenticating with infisical: %w", err)
+		}
+		if !resp.IsSuccessState() {
+			return nil, fmt.Errorf("infisical auth failed (status %d): %s", resp.StatusCode, resp.String())
+		}
+
+		k.token.Store(&cachedToken{
+			value:     authResp.AccessToken,
+			expiresAt: time.Now().Add(time.Duration(authResp.ExpiresIn)*time.Second - 30*time.Second),
+		})
+
+		return authResp.AccessToken, nil
+	})
+	if err != nil {
+		return err
+	}
+
+	r.SetBearerAuthToken(result.(string))
+	return nil
+}
+
+func (k *InfisicalKMS) resolveKeyID(ctx context.Context, name string) (string, error) {
+	if id, ok := k.keys.Load(name); ok {
+		return id.(string), nil
 	}
 
 	var result struct {
-		AccessToken string `json:"accessToken"` //nolint:gosec
-		ExpiresIn   int64  `json:"expiresIn"`
+		Key struct {
+			ID string `json:"id"`
+		} `json:"key"`
 	}
 
 	resp, err := k.client.R().
 		SetContext(ctx).
-		SetBodyJsonMarshal(map[string]string{
-			"clientId":     k.clientID,
-			"clientSecret": k.clientSecret,
-		}).
-		SetSuccessResult(&result).
-		Post("/v1/auth/universal-auth/login")
-	if err != nil {
-		return "", fmt.Errorf("authenticating with infisical: %w", err)
-	}
-	if !resp.IsSuccessState() {
-		return "", fmt.Errorf("infisical auth failed (status %d): %s", resp.StatusCode, resp.String())
-	}
-
-	k.accessToken = result.AccessToken
-	k.expiresAt = time.Now().Add(time.Duration(result.ExpiresIn)*time.Second - 30*time.Second)
-
-	return k.accessToken, nil
-}
-
-func (k *InfisicalKMS) authedRequest(ctx context.Context) (*req.Request, error) {
-	token, err := k.getToken(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return k.client.R().
-		SetContext(ctx).
-		SetBearerAuthToken(token), nil
-}
-
-func (k *InfisicalKMS) resolveKeyID(ctx context.Context, name string) (string, error) {
-	k.keysMu.RLock()
-	if id, ok := k.keys[name]; ok {
-		k.keysMu.RUnlock()
-		return id, nil
-	}
-	k.keysMu.RUnlock()
-
-	r, err := k.authedRequest(ctx)
-	if err != nil {
-		return "", err
-	}
-
-	var result struct {
-		Key infisicalKey `json:"key"`
-	}
-
-	resp, err := r.
 		SetPathParam("keyName", name).
 		SetQueryParam("projectId", k.projectID).
 		SetSuccessResult(&result).
@@ -123,24 +117,19 @@ func (k *InfisicalKMS) resolveKeyID(ctx context.Context, name string) (string, e
 		return "", fmt.Errorf("infisical get key failed (status %d): %s", resp.StatusCode, resp.String())
 	}
 
-	k.keysMu.Lock()
-	k.keys[name] = result.Key.ID
-	k.keysMu.Unlock()
-
+	k.keys.Store(name, result.Key.ID)
 	return result.Key.ID, nil
 }
 
 func (k *InfisicalKMS) CreateKey(ctx context.Context, name string) error {
-	r, err := k.authedRequest(ctx)
-	if err != nil {
-		return err
-	}
-
 	var result struct {
-		Key infisicalKey `json:"key"`
+		Key struct {
+			ID string `json:"id"`
+		} `json:"key"`
 	}
 
-	resp, err := r.
+	resp, err := k.client.R().
+		SetContext(ctx).
 		SetBodyJsonMarshal(map[string]string{
 			"projectId":           k.projectID,
 			"name":                name,
@@ -155,10 +144,7 @@ func (k *InfisicalKMS) CreateKey(ctx context.Context, name string) error {
 		return fmt.Errorf("infisical create key failed (status %d): %s", resp.StatusCode, resp.String())
 	}
 
-	k.keysMu.Lock()
-	k.keys[name] = result.Key.ID
-	k.keysMu.Unlock()
-
+	k.keys.Store(name, result.Key.ID)
 	return nil
 }
 
@@ -168,16 +154,12 @@ func (k *InfisicalKMS) Encrypt(ctx context.Context, name string, plaintext []byt
 		return "", err
 	}
 
-	r, err := k.authedRequest(ctx)
-	if err != nil {
-		return "", err
-	}
-
 	var result struct {
 		Ciphertext string `json:"ciphertext"`
 	}
 
-	resp, err := r.
+	resp, err := k.client.R().
+		SetContext(ctx).
 		SetPathParam("keyId", keyID).
 		SetBodyJsonMarshal(map[string]string{
 			"plaintext": base64.StdEncoding.EncodeToString(plaintext),
@@ -200,16 +182,12 @@ func (k *InfisicalKMS) Decrypt(ctx context.Context, name string, ciphertext stri
 		return nil, err
 	}
 
-	r, err := k.authedRequest(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	var result struct {
 		Plaintext string `json:"plaintext"`
 	}
 
-	resp, err := r.
+	resp, err := k.client.R().
+		SetContext(ctx).
 		SetPathParam("keyId", keyID).
 		SetBodyJsonMarshal(map[string]string{"ciphertext": ciphertext}).
 		SetSuccessResult(&result).
