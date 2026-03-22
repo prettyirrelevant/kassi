@@ -32,7 +32,7 @@ func (s *Store) UpsertSettlementDestinations(ctx context.Context, merchantID, ad
 		Model(&result).
 		Relation("Network").
 		Where("settlement_destination.merchant_id = ?", merchantID).
-		Where("settlement_destination.network_id IN (?)", bun.In(networkIDs)).
+		Where("settlement_destination.network_id IN (?)", bun.List(networkIDs)).
 		OrderExpr("settlement_destination.created_at ASC").
 		Scan(ctx); err != nil {
 		return nil, fmt.Errorf("fetching upserted settlement destinations: %w", err)
