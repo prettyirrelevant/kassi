@@ -93,6 +93,16 @@ func (s *Server) setupRoutes() {
 
 	sessionOrSecretKey := e.Group("", s.requireAny(s.requireSession, s.requireSecretKey))
 	sessionOrSecretKey.GET("/merchants/me", merchant.GetMe)
+
+	settlementDest := &handler.SettlementDestinationHandler{
+		Store:  s.store,
+		Config: s.config,
+	}
+
+	sessionOnly.POST("/settlement-destinations", settlementDest.Create)
+	sessionOnly.DELETE("/settlement-destinations/:id", settlementDest.Delete)
+
+	sessionOrSecretKey.GET("/settlement-destinations", settlementDest.List)
 }
 
 func (s *Server) health(c *echo.Context) error {

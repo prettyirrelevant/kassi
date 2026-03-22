@@ -1,0 +1,20 @@
+- id: "ethereum-mainnet"
+  chain_type: "evm"
+  display_name: "Ethereum"
+  confirmations: 12
+  is_active: true
+  created_at: "2026-03-01T00:00:00Z"
+
+- id: "base-mainnet"
+  chain_type: "evm"
+  display_name: "Base"
+  confirmations: 12
+  is_active: true
+  created_at: "2026-03-01T00:00:00Z"
+
+- id: "solana-mainnet"
+  chain_type: "solana"
+  display_name: "Solana"
+  confirmations: 31
+  is_active: true
+  created_at: "2026-03-01T00:00:00Z"

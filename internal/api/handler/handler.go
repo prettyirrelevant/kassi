@@ -82,3 +82,21 @@ func MerchantFromCtx(c *echo.Context) *datastore.Merchant {
 	m, _ := (*c).Get("merchant").(*datastore.Merchant)
 	return m
 }
+
+type paginationRequest struct {
+	Page    int `query:"page"`
+	PerPage int `query:"per_page"`
+}
+
+func (r *paginationRequest) Validate() error {
+	if r.Page == 0 {
+		r.Page = 1
+	}
+	if r.PerPage == 0 {
+		r.PerPage = 20
+	}
+	return validation.ValidateStruct(r,
+		validation.Field(&r.Page, validation.Min(1)),
+		validation.Field(&r.PerPage, validation.Min(1), validation.Max(100)),
+	)
+}

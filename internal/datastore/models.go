@@ -9,102 +9,102 @@ import (
 )
 
 type Network struct {
-	bun.BaseModel `bun:"table:networks"`
+	bun.BaseModel `bun:"table:networks" json:"-"`
 
-	ID            string    `bun:"id,pk"`
-	ChainType     string    `bun:"chain_type,notnull"`
-	DisplayName   string    `bun:"display_name,notnull"`
-	Confirmations int       `bun:"confirmations,notnull"`
-	IsActive      bool      `bun:"is_active,notnull,default:true"`
-	CreatedAt     time.Time `bun:"created_at,notnull,default:current_timestamp"`
+	ID            string    `bun:"id,pk" json:"id"`
+	ChainType     string    `bun:"chain_type,notnull" json:"chain_type"`
+	DisplayName   string    `bun:"display_name,notnull" json:"display_name"`
+	Confirmations int       `bun:"confirmations,notnull" json:"confirmations"`
+	IsActive      bool      `bun:"is_active,notnull,default:true" json:"is_active"`
+	CreatedAt     time.Time `bun:"created_at,notnull,default:current_timestamp" json:"created_at"`
 }
 
 type Merchant struct {
-	bun.BaseModel `bun:"table:merchants"`
+	bun.BaseModel `bun:"table:merchants" json:"-"`
 
-	ID        string    `bun:"id,pk"`
-	Name      *string   `bun:"name"`
-	CreatedAt time.Time `bun:"created_at,notnull,default:current_timestamp"`
-	UpdatedAt time.Time `bun:"updated_at,notnull,default:current_timestamp"`
+	ID        string    `bun:"id,pk" json:"id"`
+	Name      *string   `bun:"name" json:"name"`
+	CreatedAt time.Time `bun:"created_at,notnull,default:current_timestamp" json:"created_at"`
+	UpdatedAt time.Time `bun:"updated_at,notnull,default:current_timestamp" json:"updated_at"`
 
-	Config *MerchantConfig `bun:"rel:has-one,join:id=merchant_id"`
+	Config *MerchantConfig `bun:"rel:has-one,join:id=merchant_id" json:"config,omitempty"`
 }
 
 type MerchantConfig struct {
-	bun.BaseModel `bun:"table:merchant_configs"`
+	bun.BaseModel `bun:"table:merchant_configs" json:"-"`
 
-	ID            string    `bun:"id,pk"`
-	MerchantID    string    `bun:"merchant_id,notnull"`
-	PublicKeyHash *string   `bun:"public_key_hash"`
-	SecretKeyHash *string   `bun:"secret_key_hash"`
-	EncryptedSeed *string   `bun:"encrypted_seed"`
-	WebhookSecret string    `bun:"webhook_secret,notnull"`
-	WebhookURL    *string   `bun:"webhook_url"`
-	CreatedAt     time.Time `bun:"created_at,notnull,default:current_timestamp"`
-	UpdatedAt     time.Time `bun:"updated_at,notnull,default:current_timestamp"`
+	ID            string    `bun:"id,pk" json:"id"`
+	MerchantID    string    `bun:"merchant_id,notnull" json:"merchant_id"`
+	PublicKeyHash *string   `bun:"public_key_hash" json:"public_key_hash"`
+	SecretKeyHash *string   `bun:"secret_key_hash" json:"secret_key_hash"`
+	EncryptedSeed *string   `bun:"encrypted_seed" json:"-"`
+	WebhookSecret string    `bun:"webhook_secret,notnull" json:"webhook_secret"`
+	WebhookURL    *string   `bun:"webhook_url" json:"webhook_url"`
+	CreatedAt     time.Time `bun:"created_at,notnull,default:current_timestamp" json:"created_at"`
+	UpdatedAt     time.Time `bun:"updated_at,notnull,default:current_timestamp" json:"updated_at"`
 }
 
 type SettlementDestination struct {
-	bun.BaseModel `bun:"table:settlement_destinations"`
+	bun.BaseModel `bun:"table:settlement_destinations" json:"-"`
 
-	ID         string    `bun:"id,pk"`
-	MerchantID string    `bun:"merchant_id,notnull"`
-	NetworkID  string    `bun:"network_id,notnull"`
-	Address    string    `bun:"address,notnull"`
-	CreatedAt  time.Time `bun:"created_at,notnull,default:current_timestamp"`
-	UpdatedAt  time.Time `bun:"updated_at,notnull,default:current_timestamp"`
+	ID         string    `bun:"id,pk" json:"id"`
+	MerchantID string    `bun:"merchant_id,notnull" json:"merchant_id"`
+	NetworkID  string    `bun:"network_id,notnull" json:"network_id"`
+	Address    string    `bun:"address,notnull" json:"address"`
+	CreatedAt  time.Time `bun:"created_at,notnull,default:current_timestamp" json:"created_at"`
+	UpdatedAt  time.Time `bun:"updated_at,notnull,default:current_timestamp" json:"updated_at"`
 
-	Network *Network `bun:"rel:belongs-to,join:network_id=id"`
+	Network *Network `bun:"rel:belongs-to,join:network_id=id" json:"network,omitempty"`
 }
 
 type Signer struct {
-	bun.BaseModel `bun:"table:signers"`
+	bun.BaseModel `bun:"table:signers" json:"-"`
 
-	ID         string    `bun:"id,pk"`
-	MerchantID string    `bun:"merchant_id,notnull"`
-	Address    string    `bun:"address,notnull"`
-	SignerType string    `bun:"signer_type,notnull"`
-	LinkedAt   time.Time `bun:"linked_at,notnull,default:current_timestamp"`
+	ID         string    `bun:"id,pk" json:"id"`
+	MerchantID string    `bun:"merchant_id,notnull" json:"merchant_id"`
+	Address    string    `bun:"address,notnull" json:"address"`
+	SignerType string    `bun:"signer_type,notnull" json:"signer_type"`
+	LinkedAt   time.Time `bun:"linked_at,notnull,default:current_timestamp" json:"linked_at"`
 }
 
 type Asset struct {
-	bun.BaseModel `bun:"table:assets"`
+	bun.BaseModel `bun:"table:assets" json:"-"`
 
-	ID              string    `bun:"id,pk"`
-	NetworkID       string    `bun:"network_id,notnull"`
-	ContractAddress *string   `bun:"contract_address"`
-	Symbol          string    `bun:"symbol,notnull"`
-	Name            string    `bun:"name,notnull"`
-	Decimals        int       `bun:"decimals,notnull"`
-	CoingeckoID     *string   `bun:"coingecko_id"`
-	IsActive        bool      `bun:"is_active,notnull,default:true"`
-	CreatedAt       time.Time `bun:"created_at,notnull,default:current_timestamp"`
+	ID              string    `bun:"id,pk" json:"id"`
+	NetworkID       string    `bun:"network_id,notnull" json:"network_id"`
+	ContractAddress *string   `bun:"contract_address" json:"contract_address"`
+	Symbol          string    `bun:"symbol,notnull" json:"symbol"`
+	Name            string    `bun:"name,notnull" json:"name"`
+	Decimals        int       `bun:"decimals,notnull" json:"decimals"`
+	CoingeckoID     *string   `bun:"coingecko_id" json:"coingecko_id"`
+	IsActive        bool      `bun:"is_active,notnull,default:true" json:"is_active"`
+	CreatedAt       time.Time `bun:"created_at,notnull,default:current_timestamp" json:"created_at"`
 
-	Network *Network `bun:"rel:belongs-to,join:network_id=id"`
+	Network *Network `bun:"rel:belongs-to,join:network_id=id" json:"network,omitempty"`
 }
 
 type DepositAddress struct {
-	bun.BaseModel `bun:"table:deposit_addresses"`
+	bun.BaseModel `bun:"table:deposit_addresses" json:"-"`
 
-	ID          string    `bun:"id,pk"`
-	MerchantID  string    `bun:"merchant_id,notnull"`
-	Label       *string   `bun:"label"`
-	AddressType string    `bun:"address_type,notnull"`
-	CreatedAt   time.Time `bun:"created_at,notnull,default:current_timestamp"`
+	ID          string    `bun:"id,pk" json:"id"`
+	MerchantID  string    `bun:"merchant_id,notnull" json:"merchant_id"`
+	Label       *string   `bun:"label" json:"label"`
+	AddressType string    `bun:"address_type,notnull" json:"address_type"`
+	CreatedAt   time.Time `bun:"created_at,notnull,default:current_timestamp" json:"created_at"`
 
-	NetworkAddresses []NetworkAddress `bun:"rel:has-many,join:id=deposit_address_id"`
+	NetworkAddresses []NetworkAddress `bun:"rel:has-many,join:id=deposit_address_id" json:"network_addresses,omitempty"`
 }
 
 type NetworkAddress struct {
-	bun.BaseModel `bun:"table:network_addresses"`
+	bun.BaseModel `bun:"table:network_addresses" json:"-"`
 
-	ID               string `bun:"id,pk"`
-	DepositAddressID string `bun:"deposit_address_id,notnull"`
-	NetworkID        string `bun:"network_id,notnull"`
-	Address          string `bun:"address,notnull"`
-	DerivationIndex  int    `bun:"derivation_index,notnull"`
+	ID               string `bun:"id,pk" json:"id"`
+	DepositAddressID string `bun:"deposit_address_id,notnull" json:"deposit_address_id"`
+	NetworkID        string `bun:"network_id,notnull" json:"network_id"`
+	Address          string `bun:"address,notnull" json:"address"`
+	DerivationIndex  int    `bun:"derivation_index,notnull" json:"-"`
 
-	Network *Network `bun:"rel:belongs-to,join:network_id=id"`
+	Network *Network `bun:"rel:belongs-to,join:network_id=id" json:"network,omitempty"`
 }
 
 type LockedRate struct {
@@ -113,57 +113,57 @@ type LockedRate struct {
 }
 
 type PaymentIntent struct {
-	bun.BaseModel `bun:"table:payment_intents"`
+	bun.BaseModel `bun:"table:payment_intents" json:"-"`
 
-	ID               string                `bun:"id,pk"`
-	DepositAddressID string                `bun:"deposit_address_id,notnull"`
-	MerchantID       string                `bun:"merchant_id,notnull"`
-	FiatAmount       decimal.Decimal       `bun:"fiat_amount,notnull,type:numeric"`
-	FiatCurrency     string                `bun:"fiat_currency,notnull"`
-	LockedRates      map[string]LockedRate `bun:"locked_rates,notnull,type:jsonb"`
-	Status           string                `bun:"status,notnull,default:'pending'"`
-	ConfirmedAt      *time.Time            `bun:"confirmed_at"`
-	ExpiresAt        time.Time             `bun:"expires_at,notnull"`
-	CreatedAt        time.Time             `bun:"created_at,notnull,default:current_timestamp"`
-	UpdatedAt        time.Time             `bun:"updated_at,notnull,default:current_timestamp"`
+	ID               string                `bun:"id,pk" json:"id"`
+	DepositAddressID string                `bun:"deposit_address_id,notnull" json:"deposit_address_id"`
+	MerchantID       string                `bun:"merchant_id,notnull" json:"merchant_id"`
+	FiatAmount       decimal.Decimal       `bun:"fiat_amount,notnull,type:numeric" json:"fiat_amount"`
+	FiatCurrency     string                `bun:"fiat_currency,notnull" json:"fiat_currency"`
+	LockedRates      map[string]LockedRate `bun:"locked_rates,notnull,type:jsonb" json:"locked_rates"`
+	Status           string                `bun:"status,notnull,default:'pending'" json:"status"`
+	ConfirmedAt      *time.Time            `bun:"confirmed_at" json:"confirmed_at"`
+	ExpiresAt        time.Time             `bun:"expires_at,notnull" json:"expires_at"`
+	CreatedAt        time.Time             `bun:"created_at,notnull,default:current_timestamp" json:"created_at"`
+	UpdatedAt        time.Time             `bun:"updated_at,notnull,default:current_timestamp" json:"updated_at"`
 
-	DepositAddress *DepositAddress `bun:"rel:belongs-to,join:deposit_address_id=id"`
+	DepositAddress *DepositAddress `bun:"rel:belongs-to,join:deposit_address_id=id" json:"deposit_address,omitempty"`
 }
 
 type LedgerEntry struct {
-	bun.BaseModel `bun:"table:ledger_entries"`
+	bun.BaseModel `bun:"table:ledger_entries" json:"-"`
 
-	ID               string           `bun:"id,pk"`
-	DepositAddressID string           `bun:"deposit_address_id,notnull"`
-	PaymentIntentID  *string          `bun:"payment_intent_id"`
-	AssetID          string           `bun:"asset_id,notnull"`
-	NetworkID        string           `bun:"network_id,notnull"`
-	EntryType        string           `bun:"entry_type,notnull"`
-	Status           string           `bun:"status,notnull,default:'pending'"`
-	Amount           decimal.Decimal  `bun:"amount,notnull,type:numeric"`
-	FeeAmount        *decimal.Decimal `bun:"fee_amount,type:numeric"`
-	Sender           *string          `bun:"sender"`
-	Destination      *string          `bun:"destination"`
-	OnchainRef       string           `bun:"onchain_ref,notnull"`
-	Reason           *string          `bun:"reason"`
-	CreatedAt        time.Time        `bun:"created_at,notnull,default:current_timestamp"`
+	ID               string           `bun:"id,pk" json:"id"`
+	DepositAddressID string           `bun:"deposit_address_id,notnull" json:"deposit_address_id"`
+	PaymentIntentID  *string          `bun:"payment_intent_id" json:"payment_intent_id"`
+	AssetID          string           `bun:"asset_id,notnull" json:"asset_id"`
+	NetworkID        string           `bun:"network_id,notnull" json:"network_id"`
+	EntryType        string           `bun:"entry_type,notnull" json:"entry_type"`
+	Status           string           `bun:"status,notnull,default:'pending'" json:"status"`
+	Amount           decimal.Decimal  `bun:"amount,notnull,type:numeric" json:"amount"`
+	FeeAmount        *decimal.Decimal `bun:"fee_amount,type:numeric" json:"fee_amount"`
+	Sender           *string          `bun:"sender" json:"sender"`
+	Destination      *string          `bun:"destination" json:"destination"`
+	OnchainRef       string           `bun:"onchain_ref,notnull" json:"onchain_ref"`
+	Reason           *string          `bun:"reason" json:"reason"`
+	CreatedAt        time.Time        `bun:"created_at,notnull,default:current_timestamp" json:"created_at"`
 
-	Asset *Asset `bun:"rel:belongs-to,join:asset_id=id"`
+	Asset *Asset `bun:"rel:belongs-to,join:asset_id=id" json:"asset,omitempty"`
 }
 
 type WebhookDelivery struct {
-	bun.BaseModel `bun:"table:webhook_deliveries"`
+	bun.BaseModel `bun:"table:webhook_deliveries" json:"-"`
 
-	ID            string          `bun:"id,pk"`
-	MerchantID    string          `bun:"merchant_id,notnull"`
-	EventType     string          `bun:"event_type,notnull"`
-	ReferenceID   string          `bun:"reference_id,notnull"`
-	URL           string          `bun:"url,notnull"`
-	Payload       json.RawMessage `bun:"payload,notnull,type:jsonb"`
-	Status        string          `bun:"status,notnull,default:'pending'"`
-	Attempts      int             `bun:"attempts,notnull,default:0"`
-	LastAttemptAt *time.Time      `bun:"last_attempt_at"`
-	ResponseCode  *int16          `bun:"response_code"`
-	CreatedAt     time.Time       `bun:"created_at,notnull,default:current_timestamp"`
-	UpdatedAt     time.Time       `bun:"updated_at,notnull,default:current_timestamp"`
+	ID            string          `bun:"id,pk" json:"id"`
+	MerchantID    string          `bun:"merchant_id,notnull" json:"merchant_id"`
+	EventType     string          `bun:"event_type,notnull" json:"event_type"`
+	ReferenceID   string          `bun:"reference_id,notnull" json:"reference_id"`
+	URL           string          `bun:"url,notnull" json:"url"`
+	Payload       json.RawMessage `bun:"payload,notnull,type:jsonb" json:"payload"`
+	Status        string          `bun:"status,notnull,default:'pending'" json:"status"`
+	Attempts      int             `bun:"attempts,notnull,default:0" json:"attempts"`
+	LastAttemptAt *time.Time      `bun:"last_attempt_at" json:"last_attempt_at"`
+	ResponseCode  *int16          `bun:"response_code" json:"response_code"`
+	CreatedAt     time.Time       `bun:"created_at,notnull,default:current_timestamp" json:"created_at"`
+	UpdatedAt     time.Time       `bun:"updated_at,notnull,default:current_timestamp" json:"updated_at"`
 }
